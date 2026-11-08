@@ -469,14 +469,34 @@
         window.cancelEdit = () => { resetInputForm(); switchTab('history'); };
         window.deleteExpense = async (id) => { if (confirm("정말로 삭제하시겠습니까?")) { try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'expenses', id)); showToast("삭제되었습니다."); } catch(e) { alertUI("삭제 실패"); } } };
 
-        window.setSortMode = (mode) => {
+window.setSortMode = (mode) => {
             state.sortMode = mode;
+            
+            // 1. 버튼 스타일 변경
             ['date', 'category', 'location'].forEach(m => {
                 const btn = document.getElementById(`btn-sort-${m}`);
                 if(m === mode) btn.className = "px-2 py-1.5 text-xs font-semibold rounded-md bg-white shadow-sm text-gray-800 transition-all " + (m==='location'?'flex items-center gap-1':'');
                 else btn.className = "px-2 py-1.5 text-xs font-semibold rounded-md text-gray-500 hover:text-gray-800 transition-all " + (m==='location'?'flex items-center gap-1':'');
             });
-            renderHistory();
+            
+            // 2. 리스트 컨테이너와 지도 컨테이너 요소 가져오기
+            const listContainer = document.getElementById('history-list-container');
+            const mapContainer = document.getElementById('history-map-container');
+            
+            // 3. 모드에 따라 화면 전환 및 지도 렌더링
+            if (mode === 'location') {
+                if (listContainer) listContainer.classList.add('hidden');
+                if (mapContainer) mapContainer.classList.remove('hidden');
+                
+                // 컨테이너가 화면에 표시될 시간을 아주 짧게 준 뒤(150ms) 지도 생성 함수 호출
+                setTimeout(() => {
+                    initMapAndClusters();
+                }, 150);
+            } else {
+                if (mapContainer) mapContainer.classList.add('hidden');
+                if (listContainer) listContainer.classList.remove('hidden');
+                renderHistory();
+            }
         };
 
 function renderHistory() {
@@ -550,7 +570,7 @@ function renderHistory() {
             });
             listEl.innerHTML = html;
         }
-                // --- MAP & DYNAMIC CLUSTERING ---
+// --- MAP & DYNAMIC CLUSTERING ---
         function initMapAndClusters() {
             if(!leafletMap) {
                 leafletMap = L.map('map').setView([37.5665, 126.9780], 13);
@@ -558,16 +578,18 @@ function renderHistory() {
 
                 L.tileLayer(`https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=${CART_API_KEY}`, {
                     attribution: '&copy; OpenStreetMap contributors, &copy; CARTO'
-                }).addTo(leafletMap);                mapMarkersLayer = L.layerGroup().addTo(leafletMap);
+                }).addTo(leafletMap);                
+                
+                mapMarkersLayer = L.layerGroup().addTo(leafletMap);
                 
                 leafletMap.on('moveend', drawClusters);
                 leafletMap.on('zoomend', drawClusters);
             }
             
-            // Focus on first expense with location if available
-            const exWithLoc = state.expenses.find(e => e.lat && e.lon);
+            // Focus on first expense with location (NaN 에러 방지 안전장치 추가)
+            const exWithLoc = state.expenses.find(e => e.lat && e.lon && !isNaN(parseFloat(e.lat)) && !isNaN(parseFloat(e.lon)));
             if(exWithLoc) {
-                leafletMap.setView([exWithLoc.lat, exWithLoc.lon], 14);
+                leafletMap.setView([parseFloat(exWithLoc.lat), parseFloat(exWithLoc.lon)], 14);
             }
             
             setTimeout(() => { leafletMap.invalidateSize(); drawClusters(); }, 200);
@@ -577,7 +599,7 @@ function renderHistory() {
             if(!leafletMap) return;
             mapMarkersLayer.clearLayers();
 
-            const mapWidthPx = document.getElementById('map').offsetWidth;
+            const mapWidthPx = document.getElementById('map').offsetWidth || 400; // 예외 처리 추가
             const radiusPx = mapWidthPx * 0.20; // 20% of map size radius
 
             let clusters = [];
@@ -585,7 +607,15 @@ function renderHistory() {
             // Grouping logic based on container pixel distance
             state.expenses.forEach(ex => {
                 if(!ex.lat || !ex.lon) return;
-                const pt = leafletMap.latLngToContainerPoint([ex.lat, ex.lon]);
+                
+                // 문자로 저장된 좌표를 숫자로 변환
+                const lat = parseFloat(ex.lat);
+                const lon = parseFloat(ex.lon);
+                
+                // 변환된 좌표가 유효한 숫자가 아니면 패스 (에러 방지 핵심)
+                if (isNaN(lat) || isNaN(lon)) return;
+
+                const pt = leafletMap.latLngToContainerPoint([lat, lon]);
 
                 let added = false;
                 for(let c of clusters) {
@@ -598,14 +628,14 @@ function renderHistory() {
                         // Weight center slightly
                         c.x = (c.x * (c.expenses.length-1) + pt.x) / c.expenses.length;
                         c.y = (c.y * (c.expenses.length-1) + pt.y) / c.expenses.length;
-                        c.lat = (c.lat * (c.expenses.length-1) + ex.lat) / c.expenses.length;
-                        c.lon = (c.lon * (c.expenses.length-1) + ex.lon) / c.expenses.length;
+                        c.lat = (c.lat * (c.expenses.length-1) + lat) / c.expenses.length;
+                        c.lon = (c.lon * (c.expenses.length-1) + lon) / c.expenses.length;
                         added = true;
                         break;
                     }
                 }
                 if(!added) {
-                    clusters.push({ x: pt.x, y: pt.y, lat: parseFloat(ex.lat), lon: parseFloat(ex.lon), expenses: [ex] });
+                    clusters.push({ x: pt.x, y: pt.y, lat: lat, lon: lon, expenses: [ex] });
                 }
             });
 
