@@ -68,6 +68,18 @@
                 </form>
             </div>
 
+<!-- ================= 추가된 부분: 모든 여행 보기 ================= -->
+            <div class="bg-gray-50 p-5 rounded-2xl border border-gray-100 mb-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-bold text-teal-600">모든 여행 목록</h2>
+                    <button type="button" onclick="loadAllTrips()" class="text-xs text-gray-500 flex items-center gap-1 active:scale-95"><i class="ph-bold ph-arrows-clockwise"></i> 새로고침</button>
+                </div>
+                <div id="all-trips-list" class="space-y-3 max-h-48 overflow-y-auto hide-scrollbar">
+                    <div class="text-center text-sm text-gray-400 py-4">불러오는 중...</div>
+                </div>
+            </div>
+            <!-- ============================================================== -->
+
             <div class="bg-gray-50 p-5 rounded-2xl border border-gray-100">
                 <h2 class="text-lg font-bold mb-4 text-purple-600">기존 여행 참여하기</h2>
                 <div class="flex gap-2">
@@ -84,9 +96,14 @@
             
             <!-- Top Header -->
             <header class="bg-white px-5 py-4 shadow-sm z-10 flex justify-between items-center border-b border-gray-100 shrink-0">
-                <div>
-                    <h1 id="header-trip-name" class="font-bold text-lg text-gray-900 leading-tight">로딩중...</h1>
-                    <p id="header-trip-dates" class="text-xs text-gray-500"></p>
+                <div class="flex items-center gap-3">
+                    <button onclick="exitTrip()" class="text-gray-400 hover:text-gray-600 active:scale-95 transition-transform shrink-0">
+                        <i class="ph-bold ph-arrow-left text-xl"></i>
+                    </button>
+                    <div class="min-w-0">
+                        <h1 id="header-trip-name" class="font-bold text-lg text-gray-900 leading-tight truncate">로딩중...</h1>
+                        <p id="header-trip-dates" class="text-xs text-gray-500 truncate"></p>
+                    </div>
                 </div>
                 <button onclick="copyTripId()" class="text-blue-600 bg-blue-50 p-2 rounded-lg text-xs font-semibold flex items-center gap-1 active:bg-blue-100 transition-colors">
                     <i class="ph ph-copy"></i> 초대코드
@@ -318,7 +335,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, deleteDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // ==========================================
         // CONFIG & STATE
@@ -489,7 +506,70 @@
             document.getElementById('screen-setup').classList.add('hidden');
             document.getElementById('screen-main').classList.add('hidden');
             document.getElementById(`screen-${screenId}`).classList.remove('hidden');
+            
+            // 첫 화면이 열릴 때 자동으로 여행 목록 새로고침
+            if(screenId === 'setup' && window.loadAllTrips) {
+                window.loadAllTrips();
+            }
         }
+
+        window.loadAllTrips = async () => {
+            if (!db) return;
+            const listEl = document.getElementById('all-trips-list');
+            listEl.innerHTML = '<div class="text-center text-sm text-gray-400 py-4">목록 불러오는 중...</div>';
+            
+            try {
+                const tripsRef = collection(db, 'artifacts', appId, 'public', 'data', 'trips');
+                const snapshot = await getDocs(tripsRef);
+                
+                if (snapshot.empty) {
+                    listEl.innerHTML = '<div class="text-center text-sm text-gray-400 py-4">생성된 여행이 없습니다.</div>';
+                    return;
+                }
+
+                let trips = [];
+                snapshot.forEach(doc => trips.push({ id: doc.id, ...doc.data() }));
+                
+                // 최신 생성순으로 정렬
+                trips.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+                
+                let html = '';
+                trips.forEach(trip => {
+                    const memberCount = trip.members ? trip.members.length : 0;
+                    html += `
+                        <div onclick="loadTrip('${trip.id}')" class="bg-white p-3.5 rounded-xl border border-gray-200 shadow-sm cursor-pointer hover:border-teal-500 active:scale-95 transition-all text-left">
+                            <div class="flex justify-between items-start">
+                                <div class="min-w-0 pr-2">
+                                    <h3 class="font-bold text-gray-800 text-sm truncate">${trip.name}</h3>
+                                    <p class="text-[10px] font-semibold text-blue-600 mt-1 truncate">${trip.location} • 멤버 ${memberCount}명</p>
+                                </div>
+                                <span class="bg-gray-100 text-gray-500 text-[10px] px-2 py-1 rounded-md shrink-0">입장하기</span>
+                            </div>
+                        </div>
+                    `;
+                });
+                listEl.innerHTML = html;
+            } catch (error) {
+                console.error(error);
+                listEl.innerHTML = '<div class="text-center text-sm text-red-400 py-4">목록을 불러오지 못했습니다.</div>';
+            }
+        };
+
+        window.exitTrip = () => {
+            state.tripId = null;
+            state.tripData = null;
+            state.expenses = [];
+            localStorage.removeItem('last_trip_id');
+            
+            // 실시간 데이터 수신 중단
+            if (window.unsubExpenses) {
+                window.unsubExpenses();
+                window.unsubExpenses = null;
+            }
+            
+            // 첫 화면(목록 화면)으로 돌아가기
+            showScreen('setup');
+        };
 
         // ==========================================
         // TRIP MANAGEMENT
@@ -533,7 +613,8 @@
             await loadTrip(tripId);
             hideLoading();
         }
-
+// HTML의 onclick에서도 접근할 수 있도록 연결
+        window.loadTrip = loadTrip;
         async function loadTrip(tripId) {
             if (!currentUser) return;
             try {
@@ -554,6 +635,7 @@
                         
                         populateMemberSelectors();
                         showScreen('main');
+                        switchTab(state.currentTab);
                         
                         // If expenses listener not active, start it
                         if(state.expenses.length === 0 && !window.unsubExpenses) {
