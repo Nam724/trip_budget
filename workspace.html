@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>여행 가계부 - Workspace</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✈️</text></svg>">
+    
+    <!-- Leaflet CSS for Maps -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <style>
+        body { background-color: #f3f4f6; font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .app-container { max-width: 480px; margin: 0 auto; height: 100dvh; background: #ffffff; display: flex; flex-direction: column; position: relative; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+        .scrollable-content { flex: 1; overflow-y: auto; padding-bottom: 80px; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .member-checkbox:checked + label { background-color: #3b82f6; color: white; border-color: #3b82f6; }
+        #loading-overlay { backdrop-filter: blur(4px); }
+        
+        /* Map Custom Styles */
+        .cluster-marker { 
+            background: rgba(37, 99, 235, 0.95); 
+            color: white; 
+            border: 3px solid white;
+            border-radius: 50%; 
+            display: flex; 
+            flex-direction: column;
+            align-items: center; 
+            justify-content: center; 
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            font-weight: bold;
+            line-height: 1.1;
+        }
+        .cluster-marker span.count { font-size: 10px; font-weight: normal; opacity: 0.8; margin-top: 2px;}
+    </style>
+</head>
+<body class="antialiased text-gray-800">
+
+    <div class="app-container">
+        
+        <!-- Top Header -->
+        <header class="bg-white px-5 py-4 shadow-sm z-10 flex justify-between items-center border-b border-gray-100 shrink-0">
+            <div class="flex items-center gap-3">
+                <button onclick="exitWorkspace()" class="text-gray-400 hover:text-gray-600 active:scale-95 transition-transform shrink-0">
+                    <i class="ph-bold ph-arrow-left text-xl"></i>
+                </button>
+                <div class="min-w-0">
+                    <h1 id="header-trip-name" class="font-bold text-lg text-gray-900 leading-tight truncate">로딩중...</h1>
+                    <p id="header-trip-dates" class="text-xs text-gray-500 truncate"></p>
+                </div>
+            </div>
+            <button onclick="copyTripId()" class="text-blue-600 bg-blue-50 p-2 rounded-lg text-xs font-semibold flex items-center gap-1 active:bg-blue-100 transition-colors shrink-0">
+                <i class="ph ph-copy"></i> 초대코드
+            </button>
+        </header>
+
+        <!-- Tab Contents -->
+        <div class="scrollable-content relative bg-gray-50 hidden" id="workspace-content">
+            
+            <!-- TAB 1: INPUT -->
+            <div id="tab-input" class="p-5 hidden">
+                <div class="flex bg-gray-200 rounded-xl p-1 mb-6">
+                    <button id="btn-mode-manual" onclick="setInputMode('manual')" class="flex-1 py-2 text-sm font-semibold rounded-lg bg-white shadow-sm text-blue-600 transition-all">수동 입력</button>
+                    <button id="btn-mode-ocr" onclick="setInputMode('ocr')" class="flex-1 py-2 text-sm font-semibold rounded-lg text-gray-600 transition-all flex items-center justify-center gap-1"><i class="ph ph-camera"></i> 영수증 인식</button>
+                </div>
+
+                <div id="ocr-area" class="hidden mb-6">
+                    <label for="ocr-upload" class="border-2 border-dashed border-blue-300 bg-blue-50 rounded-2xl p-8 flex flex-col items-center justify-center cursor-pointer hover:bg-blue-100 transition-colors active:scale-[0.98]">
+                        <i class="ph ph-receipt text-4xl text-blue-500 mb-2"></i>
+                        <span class="text-sm font-semibold text-blue-700">영수증 사진 촬영/첨부</span>
+                        <span class="text-xs text-blue-500 mt-1">AI가 장소와 내용을 분석합니다</span>
+                        <input type="file" id="ocr-upload" accept="image/*" capture="environment" class="hidden" onchange="handleOCRUpload(event)">
+                    </label>
+                </div>
+
+                <form id="form-expense" class="space-y-5 bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                    <input type="hidden" id="expense-id">
+                    <input type="hidden" id="inp-lat">
+                    <input type="hidden" id="inp-lon">
+                    
+                    <div class="grid grid-cols-3 gap-3">
+                        <div class="col-span-2">
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">금액</label>
+                            <input type="text" inputmode="numeric" id="inp-amount" required class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="0" oninput="formatNumberInput(this)">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">통화</label>
+                            <select id="inp-currency" class="w-full border border-gray-300 rounded-xl px-3 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                                <option value="KRW">KRW (₩)</option>
+                                <option value="USD">USD ($)</option>
+                                <option value="JPY">JPY (¥)</option>
+                                <option value="PHP">PHP (₱)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">내용</label>
+                        <input type="text" id="inp-desc" required class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="어디서 무엇을 샀나요?">
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">카테고리</label>
+                            <select id="inp-category" required class="w-full border border-gray-300 rounded-xl px-3 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                                <option value="식비">식비 🍔</option>
+                                <option value="숙소">숙소 🏨</option>
+                                <option value="쇼핑">쇼핑 🛍️</option>
+                                <option value="티켓">티켓/교통 🎫</option>
+                                <option value="기타">기타 📦</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">결제수단</label>
+                            <select id="inp-method" required class="w-full border border-gray-300 rounded-xl px-3 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                                <option value="카드">카드 💳</option>
+                                <option value="현금">현금 💵</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">결제자 (누가 냈나요?)</label>
+                        <select id="inp-payer" required class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white"></select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-2">적용되는 멤버 (N빵 대상)</label>
+                        <div id="inp-members-container" class="flex flex-wrap gap-2"></div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">장소</label>
+                        <div class="flex gap-2 relative">
+                            <input type="text" id="inp-location" class="flex-1 border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none pr-8" placeholder="장소 입력 (자동 좌표 변환)" onchange="clearCoords()">
+                            <i id="coord-status" class="ph-fill ph-check-circle text-green-500 absolute right-[4.5rem] top-3.5 hidden text-lg" title="좌표 등록됨"></i>
+                            <button type="button" onclick="fetchGPSLocation()" class="bg-gray-100 border border-gray-300 text-gray-700 px-4 rounded-xl hover:bg-gray-200 transition-colors flex items-center justify-center active:scale-95" title="현재 위치 불러오기">
+                                <i class="ph ph-crosshair text-xl"></i>
+                            </button>
+                        </div>
+                        <p class="text-[10px] text-gray-400 mt-1 ml-1">* 위치 기반 통계를 위해 입력된 장소명은 백그라운드에서 지도의 좌표(GPS)로 자동 변환됩니다.</p>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">결제 일시</label>
+                        <input type="datetime-local" id="inp-time" required class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                    </div>
+
+                    <div class="pt-4 flex gap-3">
+                        <button type="button" id="btn-cancel-edit" onclick="cancelEdit()" class="hidden flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold rounded-xl py-3.5 transition-colors active:scale-[0.98]">취소</button>
+                        <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl py-3.5 shadow-md shadow-blue-200 transition-colors active:scale-[0.98]">내역 저장하기</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- TAB 2: BUDGET -->
+            <div id="tab-budget" class="p-5 hidden">
+                <div class="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-3xl p-6 text-white shadow-lg mb-6 relative overflow-hidden">
+                    <div class="absolute -right-6 -top-6 text-white/10 text-9xl"><i class="ph-fill ph-piggy-bank"></i></div>
+                    <h2 class="text-sm font-semibold opacity-90 mb-1 relative z-10">총 예산 설정</h2>
+                    <div class="flex items-end gap-2 mb-6 relative z-10">
+                        <input type="text" inputmode="numeric" id="budget-amount" class="bg-transparent border-b-2 border-white/30 text-3xl font-bold w-full outline-none focus:border-white transition-colors pb-1" placeholder="0" oninput="formatNumberInput(this)" onchange="updateBudget()">
+                        <select id="budget-currency" class="bg-white/20 border-none rounded-lg text-sm font-semibold py-1 px-2 outline-none cursor-pointer" onchange="updateBudget()">
+                            <option value="KRW" class="text-gray-800">KRW</option>
+                            <option value="USD" class="text-gray-800">USD</option>
+                            <option value="JPY" class="text-gray-800">JPY</option>
+                            <option value="PHP" class="text-gray-800">PHP</option>
+                        </select>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4 border-t border-white/20 pt-4 mt-2 relative z-10">
+                        <div>
+                            <p class="text-xs opacity-80 mb-1">총 사용 금액 (환산)</p>
+                            <p id="budget-spent" class="text-lg font-bold">₩0</p>
+                        </div>
+                        <div>
+                            <p class="text-xs opacity-80 mb-1">남은 예산</p>
+                            <p id="budget-remaining" class="text-lg font-bold">₩0</p>
+                        </div>
+                    </div>
+                </div>
+                <h3 class="font-bold text-gray-800 mb-4 px-1">카테고리별 사용 내역</h3>
+                <div id="category-list" class="space-y-3"></div>
+                <div class="mt-6 bg-blue-50 text-blue-800 text-xs p-3 rounded-lg border border-blue-100 flex gap-2 items-start">
+                    <i class="ph-fill ph-info mt-0.5"></i>
+                    <p>환산 금액은 편의를 위해 고정 환율(USD=1400원, JPY=9.3원, PHP=24.5원)로 계산된 예상 금액입니다. 실제 정확한 사용액은 전체 내역을 참고하세요.</p>
+                </div>
+            </div>
+
+            <!-- TAB 3: HISTORY & MAP -->
+            <div id="tab-history" class="p-5 hidden">
+                <div class="flex justify-between items-center mb-4">
+                    <div class="flex bg-gray-200 rounded-lg p-1">
+                        <button id="btn-sort-date" onclick="setSortMode('date')" class="px-2 py-1.5 text-xs font-semibold rounded-md bg-white shadow-sm text-gray-800">최신순</button>
+                        <button id="btn-sort-category" onclick="setSortMode('category')" class="px-2 py-1.5 text-xs font-semibold rounded-md text-gray-500 hover:text-gray-800">카테고리별</button>
+                        <button id="btn-sort-location" onclick="setSortMode('location')" class="px-2 py-1.5 text-xs font-semibold rounded-md text-gray-500 hover:text-gray-800 flex items-center gap-1"><i class="ph ph-map-pin"></i> 장소별</button>
+                    </div>
+                    <button onclick="showSettlement()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2 px-3 rounded-lg shadow-sm active:scale-95 transition-all flex items-center gap-1 shrink-0">
+                        <i class="ph-bold ph-calculator"></i> 정산
+                    </button>
+                </div>
+
+                <!-- List View Container -->
+                <div id="history-list-container">
+                    <div id="history-list" class="space-y-3"></div>
+                    <div id="history-empty" class="hidden text-center py-12">
+                        <i class="ph ph-receipt text-5xl text-gray-300 mb-3"></i>
+                        <p class="text-gray-500 text-sm">아직 등록된 지출 내역이 없습니다.</p>
+                    </div>
+                </div>
+
+                <!-- Map View Container -->
+                <div id="history-map-container" class="hidden relative h-[450px] w-full rounded-2xl border border-gray-200 shadow-sm overflow-hidden bg-gray-200">
+                    <div id="map" class="w-full h-full z-0"></div>
+                    <!-- Zoom/Pan Hint Overlay -->
+                    <div class="absolute top-2 left-1/2 transform -translate-x-1/2 bg-white/90 px-3 py-1.5 rounded-full shadow text-[10px] font-bold text-gray-600 z-[400] flex items-center gap-1 pointer-events-none">
+                        <i class="ph-bold ph-arrows-out-cardinal text-blue-500"></i> 지도를 움직이면 금액이 합산됩니다
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Navigation -->
+        <nav id="bottom-nav" class="bg-white border-t border-gray-200 px-6 py-3 hidden justify-between items-center pb-safe absolute bottom-0 w-full z-20 shadow-[0_-5px_15px_rgba(0,0,0,0.05)]">
+            <button onclick="switchTab('input')" id="nav-input" class="flex flex-col items-center p-2 text-blue-600 transition-colors w-16">
+                <i class="ph-fill ph-pencil-simple text-2xl mb-1 transition-transform"></i>
+                <span class="text-[10px] font-bold">입력</span>
+            </button>
+            <button onclick="switchTab('budget')" id="nav-budget" class="flex flex-col items-center p-2 text-gray-400 hover:text-gray-600 transition-colors w-16">
+                <i class="ph ph-chart-pie-slice text-2xl mb-1 transition-transform"></i>
+                <span class="text-[10px] font-semibold">예산</span>
+            </button>
+            <button onclick="switchTab('history')" id="nav-history" class="flex flex-col items-center p-2 text-gray-400 hover:text-gray-600 transition-colors w-16">
+                <i class="ph ph-list-dashes text-2xl mb-1 transition-transform"></i>
+                <span class="text-[10px] font-semibold">내역/지도</span>
+            </button>
+        </nav>
+
+        <!-- Settlement Modal -->
+        <div id="settle-modal" class="absolute inset-0 z-40 hidden">
+            <div class="absolute inset-0 bg-black/50" onclick="closeSettlement()"></div>
+            <div class="absolute bottom-0 w-full bg-white rounded-t-3xl shadow-2xl p-6 transform transition-transform translate-y-full" id="settle-modal-content" style="max-height: 85dvh; overflow-y: auto;">
+                <div class="w-12 h-1.5 bg-gray-300 rounded-full mx-auto mb-6"></div>
+                <div class="text-center mb-6">
+                    <div class="inline-flex items-center justify-center w-14 h-14 bg-indigo-100 text-indigo-600 rounded-full mb-3">
+                        <i class="ph-fill ph-hand-coins text-3xl"></i>
+                    </div>
+                    <h2 class="text-xl font-bold text-gray-900">최종 정산 결과</h2>
+                    <p class="text-xs text-gray-500 mt-1">누가 누구에게 얼마를 보내야 할까요?</p>
+                </div>
+                <div id="settle-results" class="space-y-3 mb-8"></div>
+                <button onclick="closeSettlement()" class="w-full bg-gray-900 text-white font-bold py-3.5 rounded-xl active:scale-[0.98] transition-transform">닫기</button>
+            </div>
+        </div>
+
+        <div id="loading-overlay" class="absolute inset-0 bg-white/80 z-50 flex flex-col items-center justify-center hidden">
+            <div class="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
+            <p id="loading-text" class="text-sm font-semibold text-gray-700">로딩 중...</p>
+        </div>
+        
+        <div id="toast" class="absolute top-4 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-5 py-3 rounded-xl shadow-lg text-sm font-semibold opacity-0 transition-opacity duration-300 pointer-events-none z-50 flex items-center gap-2">
+            <i class="ph-fill ph-check-circle text-green-400 text-lg"></i>
+            <span id="toast-msg">알림</span>
+        </div>
+
+    </div>
+
+    <!-- Leaflet JS for Maps -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, updateDoc, setDoc, deleteDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const appId = "1:793454515760:web:2c727f6567e378cd5ffff5";
+        const firebaseConfig = { apiKey: "AIzaSyC5rDmh2nEMawp2kqnw_LycoH4QcdtKtB4", authDomain: "trip-budget-52f07.firebaseapp.com", projectId: "trip-budget-52f07" };
+        const geminiApiKey = "AQ.Ab8RN6K" + "5h0S6vkOBR" + "rRNm_Zl83w2uP9toPg7MgPi" + "SBf5fDTpiw";
+
+        let app, db, auth, currentUser, leafletMap, mapMarkersLayer;
+        
+        const state = { tripId: null, tripData: null, expenses: [], currentTab: 'input', inputMode: 'manual', sortMode: 'date' };
+        const MOCK_EXCHANGE_RATES = { KRW: 1, USD: 1400, JPY: 9.3, PHP: 24.5 };
+        const CATEGORY_COLORS = { '식비': 'bg-orange-100 text-orange-700', '숙소': 'bg-indigo-100 text-indigo-700', '쇼핑': 'bg-pink-100 text-pink-700', '티켓': 'bg-emerald-100 text-emerald-700', '기타': 'bg-gray-100 text-gray-700' };
+        const CATEGORY_ICONS = { '식비': 'ph-hamburger', '숙소': 'ph-bed', '쇼핑': 'ph-tote', '티켓': 'ph-ticket', '기타': 'ph-package' };
+
+        async function init() {
+            const savedTripId = localStorage.getItem('last_trip_id');
+            if (!savedTripId) { window.location.href = 'index.html'; return; }
+            showLoading("데이터 불러오는 중...");
+            try {
+                app = initializeApp(firebaseConfig); db = getFirestore(app); auth = getAuth(app);
+                await signInAnonymously(auth); currentUser = auth.currentUser;
+                await loadTrip(savedTripId);
+                
+                const now = new Date(); now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+                document.getElementById('inp-time').value = now.toISOString().slice(0,16);
+                document.getElementById('form-expense').addEventListener('submit', handleSaveExpense);
+            } catch (error) { alertUI("초기화 실패. 메인으로 이동합니다."); setTimeout(() => { window.location.href = 'index.html'; }, 1500); } 
+            finally { hideLoading(); }
+        }
+
+        async function loadTrip(tripId) {
+            onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'trips', tripId), (docSnap) => {
+                if (docSnap.exists()) {
+                    state.tripId = tripId; state.tripData = docSnap.data();
+                    document.getElementById('header-trip-name').textContent = state.tripData.name;
+                    document.getElementById('header-trip-dates').textContent = state.tripData.dates;
+                    document.getElementById('budget-amount').value = (state.tripData.budget || '').toLocaleString('en-US');
+                    document.getElementById('budget-currency').value = state.tripData.budgetCurrency || 'KRW';
+                    populateMemberSelectors();
+                    document.getElementById('workspace-content').classList.remove('hidden');
+                    document.getElementById('bottom-nav').classList.remove('hidden');
+                    document.getElementById('bottom-nav').classList.add('flex');
+                    
+                    if (state.expenses.length === 0 && !window.unsubExpenses) listenToExpenses(tripId);
+                    else { if (state.currentTab === 'budget') renderBudget(); if(state.currentTab === 'history') renderHistory(); }
+                } else { alertUI("유효하지 않은 코드입니다."); window.location.href = 'index.html'; }
+            });
+        }
+
+        function listenToExpenses(tripId) {
+            window.unsubExpenses = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'expenses'), (snapshot) => {
+                const allExpenses = [];
+                snapshot.forEach(doc => { if (doc.data().tripId === tripId) allExpenses.push({ id: doc.id, ...doc.data() }); });
+                allExpenses.sort((a, b) => new Date(b.time) - new Date(a.time));
+                state.expenses = allExpenses;
+                if (state.currentTab === 'history') renderHistory();
+                if (state.currentTab === 'budget') renderBudget();
+            });
+        }
+
+        window.formatNumberInput = (input) => {
+            let value = input.value.replace(/[^\d]/g, '');
+            if(value !== '') input.value = Number(value).toLocaleString('en-US');
+            else input.value = '';
+        };
+
+        window.switchTab = (tabId) => {
+            state.currentTab = tabId;
+            ['input', 'budget', 'history'].forEach(id => {
+                document.getElementById(`tab-${id}`).classList.add('hidden');
+                const navItem = document.getElementById(`nav-${id}`);
+                navItem.classList.remove('text-blue-600'); navItem.classList.add('text-gray-400');
+                navItem.querySelector('i').classList.replace('ph-fill', 'ph');
+                navItem.querySelector('i').classList.remove('scale-110');
+            });
+            document.getElementById(`tab-${tabId}`).classList.remove('hidden');
+            const activeNav = document.getElementById(`nav-${tabId}`);
+            activeNav.classList.replace('text-gray-400', 'text-blue-600');
+            activeNav.querySelector('i').classList.replace('ph', 'ph-fill');
+            activeNav.querySelector('i').classList.add('scale-110');
+
+            if (tabId === 'budget') renderBudget();
+            if (tabId === 'history') {
+                renderHistory();
+                if(state.sortMode === 'location' && leafletMap) {
+                    setTimeout(() => leafletMap.invalidateSize(), 100);
+                }
+            }
+        };
+
+        // Geocoding Logic (Nominatim)
+        async function fetchGeocode(address) {
+            try {
+                const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1&accept-language=ko`);                const data = await res.json();
+                if(data && data.length > 0) return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+            } catch(e) { console.error("Geocoding failed", e); }
+            return null;
+        }
+
+        window.clearCoords = () => {
+            document.getElementById('inp-lat').value = '';
+            document.getElementById('inp-lon').value = '';
+            document.getElementById('coord-status').classList.add('hidden');
+        };
+
+        function setCoords(lat, lon) {
+            document.getElementById('inp-lat').value = lat;
+            document.getElementById('inp-lon').value = lon;
+            document.getElementById('coord-status').classList.remove('hidden');
+        }
+
+        async function handleSaveExpense(e) {
+            e.preventDefault(); if (!currentUser || !state.tripId) return;
+            const amount = parseFloat(document.getElementById('inp-amount').value.replace(/,/g, '')) || 0;
+            const currency = document.getElementById('inp-currency').value;
+            const desc = document.getElementById('inp-desc').value;
+            const category = document.getElementById('inp-category').value;
+            const method = document.getElementById('inp-method').value;
+            const payer = document.getElementById('inp-payer').value;
+            const location = document.getElementById('inp-location').value;
+            const time = document.getElementById('inp-time').value;
+            let lat = document.getElementById('inp-lat').value;
+            let lon = document.getElementById('inp-lon').value;
+            
+            const involved = Array.from(document.querySelectorAll('.member-checkbox:checked')).map(cb => cb.value);
+            if (involved.length === 0) return alertUI("적용되는 멤버를 최소 1명 선택하세요.");
+
+            showLoading("저장 중 (위치 확인 포함)...");
+            
+            // Auto Geocode if manual text exists but no coords
+            if(location.trim() !== '' && (!lat || !lon)) {
+                const coords = await fetchGeocode(location);
+                if(coords) { lat = coords.lat; lon = coords.lon; }
+            }
+
+            const expenseData = { tripId: state.tripId, amount, currency, desc, category, method, payer, involved, location, time, lat: lat||null, lon: lon||null, updatedAt: new Date().toISOString() };
+            const expenseId = document.getElementById('expense-id').value;
+            
+            try {
+                if (expenseId) { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'expenses', expenseId), expenseData); showToast("수정되었습니다."); } 
+                else { expenseData.createdAt = new Date().toISOString(); await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'expenses', Math.random().toString(36).substring(2, 9)), expenseData); showToast("지출이 추가되었습니다."); }
+                resetInputForm(); switchTab('history');
+            } catch (error) { alertUI("저장 실패"); } finally { hideLoading(); }
+        }
+
+        function resetInputForm() {
+            document.getElementById('form-expense').reset();
+            document.getElementById('expense-id').value = '';
+            clearCoords();
+            document.querySelectorAll('.member-checkbox').forEach(cb => cb.checked = true);
+            const now = new Date(); now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+            document.getElementById('inp-time').value = now.toISOString().slice(0,16);
+            document.getElementById('btn-cancel-edit').classList.add('hidden');
+        }
+
+        window.editExpense = (id) => {
+            const ex = state.expenses.find(e => e.id === id); if(!ex) return;
+            document.getElementById('expense-id').value = ex.id;
+            document.getElementById('inp-amount').value = ex.amount.toLocaleString('en-US');
+            document.getElementById('inp-currency').value = ex.currency;
+            document.getElementById('inp-desc').value = ex.desc;
+            document.getElementById('inp-category').value = ex.category;
+            document.getElementById('inp-method').value = ex.method;
+            document.getElementById('inp-payer').value = ex.payer;
+            document.getElementById('inp-location').value = ex.location || '';
+            document.getElementById('inp-time').value = ex.time;
+            if(ex.lat && ex.lon) setCoords(ex.lat, ex.lon); else clearCoords();
+            document.querySelectorAll('.member-checkbox').forEach(cb => { cb.checked = ex.involved.includes(cb.value); });
+            document.getElementById('btn-cancel-edit').classList.remove('hidden');
+            switchTab('input'); window.scrollTo({ top: 0, behavior: 'smooth' });
+        };
+        window.cancelEdit = () => { resetInputForm(); switchTab('history'); };
+        window.deleteExpense = async (id) => { if (confirm("정말로 삭제하시겠습니까?")) { try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'expenses', id)); showToast("삭제되었습니다."); } catch(e) { alertUI("삭제 실패"); } } };
+
+        window.setSortMode = (mode) => {
+            state.sortMode = mode;
+            ['date', 'category', 'location'].forEach(m => {
+                const btn = document.getElementById(`btn-sort-${m}`);
+                if(m === mode) btn.className = "px-2 py-1.5 text-xs font-semibold rounded-md bg-white shadow-sm text-gray-800 transition-all " + (m==='location'?'flex items-center gap-1':'');
+                else btn.className = "px-2 py-1.5 text-xs font-semibold rounded-md text-gray-500 hover:text-gray-800 transition-all " + (m==='location'?'flex items-center gap-1':'');
+            });
+            renderHistory();
+        };
+
+        function renderHistory() {
+            const listEl = document.getElementById('history-list');
+            const emptyEl = document.getElementById('history-empty');
+            const listContainer = document.getElementById('history-list-container');
+            const mapContainer = document.getElementById('history-map-container');
+            
+            if (state.expenses.length === 0) {
+                listContainer.classList.remove('hidden'); mapContainer.classList.add('hidden');
+                listEl.innerHTML = ''; emptyEl.classList.remove('hidden'); return;
+            } else { emptyEl.classList.add('hidden'); }
+            
+            if(state.sortMode === 'location') {
+                // Show MAP
+                listContainer.classList.add('hidden'); mapContainer.classList.remove('hidden');
+                initMapAndClusters();
+            } else {
+                // Show LIST
+                listContainer.classList.remove('hidden'); mapContainer.classList.add('hidden');
+                let grouped = {};
+                state.expenses.forEach(ex => { const key = state.sortMode === 'date' ? ex.time.split('T')[0] : ex.category; if(!grouped[key]) grouped[key] = []; grouped[key].push(ex); });
+                let html = ''; let keys = Object.keys(grouped);
+                if(state.sortMode === 'date') keys.sort((a,b) => b.localeCompare(a));
+                else { const catOrder = ['식비', '숙소', '쇼핑', '티켓', '기타']; keys.sort((a,b) => catOrder.indexOf(a) - catOrder.indexOf(b)); }
+                keys.forEach(key => {
+                    let groupTitle = state.sortMode === 'date' ? `${new Date(key).getFullYear()}년 ${new Date(key).getMonth()+1}월 ${new Date(key).getDate()}일` : key;
+                    html += `<div class="text-xs font-bold text-gray-500 mb-2 mt-4 px-1">${groupTitle}</div>`;
+                    grouped[key].forEach(ex => {
+                        html += `
+                            <div class="bg-white p-3.5 rounded-xl shadow-sm border border-gray-100 flex items-center gap-3 relative overflow-hidden group">
+                                <div class="w-10 h-10 rounded-full flex items-center justify-center text-xl shrink-0 ${CATEGORY_COLORS[ex.category]||CATEGORY_COLORS['기타']}"><i class="ph-fill ${CATEGORY_ICONS[ex.category]||CATEGORY_ICONS['기타']}"></i></div>
+                                <div class="flex-1 min-w-0" onclick="editExpense('${ex.id}')">
+                                    <div class="flex justify-between items-start mb-0.5"><div class="font-bold text-gray-800 text-sm truncate pr-2">${ex.desc}</div><div class="font-bold text-gray-900 text-sm shrink-0">${formatMoney(ex.amount, ex.currency)}</div></div>
+                                    <div class="flex justify-between items-center text-[10px] text-gray-500"><div class="truncate"><span class="font-semibold text-blue-600">${ex.payer}</span> 결제 • ${ex.involved.length}명 N빵</div><span>${ex.time.split('T')[1]}</span></div>
+                                </div>
+                                <div class="absolute right-0 top-0 bottom-0 bg-red-500 w-12 flex items-center justify-center text-white transform translate-x-full group-hover:translate-x-0 transition-transform cursor-pointer" onclick="deleteExpense('${ex.id}')"><i class="ph-fill ph-trash text-lg"></i></div>
+                            </div>`;
+                    });
+                });
+                listEl.innerHTML = html;
+            }
+        }
+
+        // --- MAP & DYNAMIC CLUSTERING ---
+        function initMapAndClusters() {
+            if(!leafletMap) {
+                leafletMap = L.map('map').setView([37.5665, 126.9780], 13);
+                const CART_API_KEY = "cb1_54kb_1_6c4eefeaee215986ba5ae033";
+
+                L.tileLayer(`https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=${CART_API_KEY}`, {
+                    attribution: '&copy; OpenStreetMap contributors, &copy; CARTO'
+                }).addTo(leafletMap);                mapMarkersLayer = L.layerGroup().addTo(leafletMap);
+                
+                leafletMap.on('moveend', drawClusters);
+                leafletMap.on('zoomend', drawClusters);
+            }
+            
+            // Focus on first expense with location if available
+            const exWithLoc = state.expenses.find(e => e.lat && e.lon);
+            if(exWithLoc) {
+                leafletMap.setView([exWithLoc.lat, exWithLoc.lon], 14);
+            }
+            
+            setTimeout(() => { leafletMap.invalidateSize(); drawClusters(); }, 200);
+        }
+
+        function drawClusters() {
+            if(!leafletMap) return;
+            mapMarkersLayer.clearLayers();
+
+            const mapWidthPx = document.getElementById('map').offsetWidth;
+            const radiusPx = mapWidthPx * 0.20; // 20% of map size radius
+
+            let clusters = [];
+
+            // Grouping logic based on container pixel distance
+            state.expenses.forEach(ex => {
+                if(!ex.lat || !ex.lon) return;
+                const pt = leafletMap.latLngToContainerPoint([ex.lat, ex.lon]);
+
+                let added = false;
+                for(let c of clusters) {
+                    const dx = c.x - pt.x;
+                    const dy = c.y - pt.y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    
+                    if(dist < radiusPx) {
+                        c.expenses.push(ex);
+                        // Weight center slightly
+                        c.x = (c.x * (c.expenses.length-1) + pt.x) / c.expenses.length;
+                        c.y = (c.y * (c.expenses.length-1) + pt.y) / c.expenses.length;
+                        c.lat = (c.lat * (c.expenses.length-1) + ex.lat) / c.expenses.length;
+                        c.lon = (c.lon * (c.expenses.length-1) + ex.lon) / c.expenses.length;
+                        added = true;
+                        break;
+                    }
+                }
+                if(!added) {
+                    clusters.push({ x: pt.x, y: pt.y, lat: parseFloat(ex.lat), lon: parseFloat(ex.lon), expenses: [ex] });
+                }
+            });
+
+            const budgetCur = state.tripData.budgetCurrency || 'KRW';
+
+            clusters.forEach(c => {
+                let totalBase = 0;
+                c.expenses.forEach(e => { totalBase += e.amount * (MOCK_EXCHANGE_RATES[e.currency] || 1); });
+                const finalAmt = totalBase / (MOCK_EXCHANGE_RATES[budgetCur] || 1);
+                
+                let shortAmt = formatMoney(finalAmt, budgetCur);
+                
+                const html = `<div class="cluster-marker w-16 h-16 text-[11px] hover:scale-110 transition-transform cursor-pointer">
+                    ${shortAmt}<span class="count">${c.expenses.length}건</span>
+                </div>`;
+                
+                const icon = L.divIcon({ html: html, className: '', iconSize: [64,64], iconAnchor: [32,32] });
+                
+                // Popup content
+                const popupHtml = `<div class="p-1 min-w-[150px]">
+                    <h4 class="font-bold text-sm mb-2 border-b pb-1 text-blue-600">이 지역 지출 내역</h4>
+                    ${c.expenses.map(e => `<div class="text-xs mb-1 flex justify-between gap-4"><span>${e.desc}</span> <b>${formatMoney(e.amount, e.currency)}</b></div>`).join('')}
+                    <div class="mt-2 text-center border-t pt-1 font-bold text-gray-800 text-xs">총합: ${shortAmt}</div>
+                </div>`;
+                
+                L.marker([c.lat, c.lon], {icon: icon}).addTo(mapMarkersLayer).bindPopup(popupHtml);
+            });
+        }
+        // --- END MAP ---
+
+        // External API Calls
+        window.fetchGPSLocation = () => {
+            const locInput = document.getElementById('inp-location');
+            if(!navigator.geolocation) return alertUI("위치 정보를 지원하지 않습니다.");
+            locInput.value = "위치 찾는 중..."; clearCoords();
+            navigator.geolocation.getCurrentPosition(async (pos) => {
+                try {
+                    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${pos.coords.latitude}&lon=${pos.coords.longitude}&format=json&accept-language=ko`);
+                    if(res.ok) {
+                        const data = await res.json();
+                        let shortAddress = data.address.city || data.address.town || data.address.county || "";
+                        if(data.address.road || data.address.suburb) shortAddress += " " + (data.address.road || data.address.suburb);
+                        locInput.value = (data.name ? data.name + " (" + shortAddress.trim() + ")" : shortAddress) || data.display_name.split(',').slice(0,2).join(', ');
+                        setCoords(pos.coords.latitude, pos.coords.longitude);
+                    }
+                } catch(e) { locInput.value = `${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`; setCoords(pos.coords.latitude, pos.coords.longitude); }
+            }, () => { locInput.value = ""; alertUI("위치 권한을 확인해주세요."); }, { timeout: 10000 });
+        };
+
+        window.handleOCRUpload = async (event) => {
+            const file = event.target.files[0]; if(!file) return;
+            showLoading("영수증 분석 중... (약 5~10초 소요)");
+            try {
+                const base64Data = await new Promise((resolve, reject) => { const r = new FileReader(); r.readAsDataURL(file); r.onload = () => resolve(r.result); r.onerror = reject; });
+                const payload = { contents: [{ role: "user", parts: [ { text: `이 영수증을 분석해서 JSON 형식으로 반환해. - amount: 숫자(가격) - currency: 'KRW','USD','JPY','PHP' 중 하나 - desc: 주요 항목 또는 가게 이름 - category: '식비','숙소','쇼핑','티켓','기타' 중 하나 - method: '카드','현금' - location: 자세한 가게 주소나 장소 이름 (매우 중요, 도로명 주소 권장) - time: YYYY-MM-DDTHH:MM 형식의 결제 시간` }, { inlineData: { mimeType: file.type, data: base64Data.split(',')[1] } } ]}], generationConfig: { responseMimeType: "application/json" } };
+                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                const result = await res.json();
+                if(result.candidates && result.candidates[0].content.parts[0].text) {
+                    const data = JSON.parse(result.candidates[0].content.parts[0].text);
+                    document.getElementById('inp-amount').value = (data.amount || '').toLocaleString('en-US');
+                    if(data.currency) document.getElementById('inp-currency').value = data.currency;
+                    if(data.desc) document.getElementById('inp-desc').value = data.desc;
+                    if(data.category && document.querySelector(`#inp-category option[value="${data.category}"]`)) document.getElementById('inp-category').value = data.category;
+                    if(data.method && document.querySelector(`#inp-method option[value="${data.method}"]`)) document.getElementById('inp-method').value = data.method;
+                    if(data.time) document.getElementById('inp-time').value = data.time.slice(0, 16);
+                    if(data.location) {
+                        document.getElementById('inp-location').value = data.location;
+                        const coords = await fetchGeocode(data.location);
+                        if(coords) setCoords(coords.lat, coords.lon); else clearCoords();
+                    }
+                    showToast("영수증 분석 완료."); setInputMode('manual');
+                } else throw new Error("API error");
+            } catch(e) { alertUI("영수증 분석 실패."); } finally { hideLoading(); event.target.value = ''; }
+        };
+
+        // Utility, Budget & Settlement Reducers (Minified for brevity)
+        function formatMoney(amount, currency) {
+            if(currency === 'KRW' || currency === 'JPY') return (currency==='KRW'?'₩':'¥') + Math.round(amount).toLocaleString();
+            if(currency === 'USD') return `$${amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            if(currency === 'PHP') return `₱${amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            return amount.toLocaleString();
+        }
+        function populateMemberSelectors() {
+            const members = state.tripData.members || [];
+            document.getElementById('inp-payer').innerHTML = members.map(m => `<option value="${m}">${m}</option>`).join('');
+            document.getElementById('inp-members-container').innerHTML = members.map((m, idx) => `<div class="relative"><input type="checkbox" id="mem-${idx}" value="${m}" class="member-checkbox hidden" checked><label for="mem-${idx}" class="inline-block px-3 py-1.5 rounded-full border border-gray-300 text-xs font-semibold text-gray-600 cursor-pointer transition-colors bg-white">${m}</label></div>`).join('');
+        }
+        window.updateBudget = async () => { try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'trips', state.tripId), { budget: parseFloat(document.getElementById('budget-amount').value.replace(/,/g,''))||0, budgetCurrency: document.getElementById('budget-currency').value }); } catch(e){} };
+        function renderBudget() {
+            const listEl = document.getElementById('category-list'); listEl.innerHTML = '';
+            const budgetAmt = state.tripData.budget || 0, budgetCur = state.tripData.budgetCurrency || 'KRW';
+            const sums = { KRW: 0, USD: 0, JPY: 0, PHP: 0 }, catSums = {};
+            state.expenses.forEach(ex => { sums[ex.currency] += ex.amount; if(!catSums[ex.category]) catSums[ex.category] = { KRW: 0, USD: 0, JPY: 0, PHP: 0 }; catSums[ex.category][ex.currency] += ex.amount; });
+            let totalEstInKRW = 0; Object.keys(sums).forEach(cur => { totalEstInKRW += sums[cur] * (MOCK_EXCHANGE_RATES[cur] || 1); });
+            const totalEst = totalEstInKRW / (MOCK_EXCHANGE_RATES[budgetCur] || 1), remaining = budgetAmt - totalEst;
+            let spentText = []; Object.keys(sums).forEach(cur => { if(sums[cur] > 0) spentText.push(formatMoney(sums[cur], cur)); });
+            if(spentText.length === 0) spentText.push(formatMoney(0, budgetCur));
+            let spentHtml = spentText.join(' <span class="text-white/70 text-sm font-normal">&</span> ');
+            const activeCurrencies = Object.keys(sums).filter(cur => sums[cur] > 0);
+            if(activeCurrencies.length > 1 || (activeCurrencies.length === 1 && activeCurrencies[0] !== budgetCur)) spentHtml += `<div class="text-xs opacity-80 mt-0.5">(총 ${formatMoney(totalEst, budgetCur)})</div>`;
+            document.getElementById('budget-spent').innerHTML = spentHtml;
+            document.getElementById('budget-remaining').innerHTML = formatMoney(remaining, budgetCur);
+            document.getElementById('budget-remaining').className = remaining < 0 ? "text-lg font-bold text-red-300" : "text-lg font-bold text-white";
+            ['식비', '숙소', '쇼핑', '티켓', '기타'].forEach(cat => {
+                if(!catSums[cat]) return; let amounts = [], catEstInKRW = 0;
+                Object.keys(catSums[cat]).forEach(cur => { if(catSums[cat][cur] > 0) { amounts.push(formatMoney(catSums[cat][cur], cur)); catEstInKRW += catSums[cat][cur] * (MOCK_EXCHANGE_RATES[cur] || 1); } });
+                if(amounts.length === 0) return; const pct = totalEst > 0 ? Math.min(100, Math.round(((catEstInKRW/(MOCK_EXCHANGE_RATES[budgetCur] || 1)) / totalEst) * 100)) : 0;
+                listEl.insertAdjacentHTML('beforeend', `<div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4"><div class="w-12 h-12 rounded-full flex items-center justify-center text-2xl ${CATEGORY_COLORS[cat]||CATEGORY_COLORS['기타']}"><i class="ph-fill ${CATEGORY_ICONS[cat]||CATEGORY_ICONS['기타']}"></i></div><div class="flex-1"><div class="flex justify-between items-center mb-1"><span class="font-bold text-gray-800 text-sm">${cat}</span><span class="font-bold text-gray-900 text-sm text-right">${amounts.join('<br>')}</span></div><div class="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden"><div class="bg-blue-500 h-1.5 rounded-full" style="width: ${pct}%"></div></div><div class="text-[10px] text-gray-400 mt-1 text-right">총 지출의 ${pct}%</div></div></div>`);
+            });
+            if(listEl.innerHTML === '') listEl.innerHTML = `<div class="text-center text-sm text-gray-400 py-4">사용 내역이 없습니다.</div>`;
+        }
+        window.showSettlement = () => {
+            const resultsEl = document.getElementById('settle-results'), members = state.tripData.members || [];
+            if(state.expenses.length === 0 || members.length === 0) { resultsEl.innerHTML = `<div class="text-center text-sm text-gray-500 py-6">정산할 내역이 없습니다.</div>`; } else {
+                let balances = {}; ['KRW', 'USD', 'JPY', 'PHP'].forEach(cur => balances[cur] = {});
+                members.forEach(m => { ['KRW', 'USD', 'JPY', 'PHP'].forEach(cur => balances[cur][m] = 0); });
+                state.expenses.forEach(ex => {
+                    const cur = ex.currency || 'KRW'; if(!balances[cur]) { balances[cur] = {}; members.forEach(m => balances[cur][m] = 0); }
+                    balances[cur][ex.payer] += Number(ex.amount); ex.involved.forEach(m => { balances[cur][m] -= Number(ex.amount) / ex.involved.length; });
+                });
+                let results = [];
+                for (let cur of Object.keys(balances)) {
+                    let debtors = [], creditors = [];
+                    members.forEach(m => { let b = balances[cur][m]; if (b > 0.01) creditors.push({ member: m, amount: b }); else if (b < -0.01) debtors.push({ member: m, amount: -b }); });
+                    debtors.sort((a,b) => b.amount - a.amount); creditors.sort((a,b) => b.amount - a.amount);
+                    let d = 0, c = 0;
+                    while (d < debtors.length && c < creditors.length) {
+                        let amount = Math.min(debtors[d].amount, creditors[c].amount);
+                        results.push({ from: debtors[d].member, to: creditors[c].member, amount: amount, currency: cur });
+                        debtors[d].amount -= amount; creditors[c].amount -= amount;
+                        if (debtors[d].amount < 0.01) d++; if (creditors[c].amount < 0.01) c++;
+                    }
+                }
+                if(results.length === 0) resultsEl.innerHTML = `<div class="bg-green-50 p-4 rounded-xl text-center border border-green-100"><i class="ph-fill ph-check-circle text-3xl text-green-500 mb-2"></i><p class="font-bold text-green-800 text-sm">모든 정산이 딱 맞습니다!<br>보낼 돈이 없습니다.</p></div>`;
+                else resultsEl.innerHTML = results.map(r => `<div class="flex items-center justify-between bg-gray-50 border border-gray-100 p-4 rounded-xl"><div class="flex items-center gap-3"><div class="font-bold text-gray-800">${r.from}</div><i class="ph-bold ph-arrow-right text-gray-400"></i><div class="font-bold text-blue-600">${r.to}</div></div><div class="font-bold text-gray-900">${formatMoney(r.amount, r.currency)}</div></div>`).join('');
+            }
+            document.getElementById('settle-modal').classList.remove('hidden');
+            requestAnimationFrame(() => document.getElementById('settle-modal-content').classList.remove('translate-y-full'));
+        };
+        window.closeSettlement = () => { document.getElementById('settle-modal-content').classList.add('translate-y-full'); setTimeout(() => document.getElementById('settle-modal').classList.add('hidden'), 300); };
+        window.exitWorkspace = () => { localStorage.removeItem('last_trip_id'); window.location.href = 'index.html'; };
+        window.copyTripId = () => { const dummy = document.createElement('input'); document.body.appendChild(dummy); dummy.value = state.tripId; dummy.select(); document.execCommand('copy'); document.body.removeChild(dummy); showToast("초대 코드(ID)가 복사되었습니다!"); };
+        window.setInputMode = (mode) => { state.inputMode = mode; const bM = document.getElementById('btn-mode-manual'), bO = document.getElementById('btn-mode-ocr'), oA = document.getElementById('ocr-area'); if(mode === 'manual') { bM.className = "flex-1 py-2 text-sm font-semibold rounded-lg bg-white shadow-sm text-blue-600 transition-all"; bO.className = "flex-1 py-2 text-sm font-semibold rounded-lg text-gray-600 transition-all flex items-center justify-center gap-1"; oA.classList.add('hidden'); } else { bO.className = "flex-1 py-2 text-sm font-semibold rounded-lg bg-white shadow-sm text-blue-600 transition-all flex items-center justify-center gap-1"; bM.className = "flex-1 py-2 text-sm font-semibold rounded-lg text-gray-600 transition-all"; oA.classList.remove('hidden'); } };
+        function showLoading(text) { document.getElementById('loading-text').textContent = text; document.getElementById('loading-overlay').classList.remove('hidden'); }
+        function hideLoading() { document.getElementById('loading-overlay').classList.add('hidden'); }
+        function showToast(msg) { const toast = document.getElementById('toast'); document.getElementById('toast-msg').textContent = msg; toast.classList.remove('opacity-0'); toast.classList.add('opacity-100', 'translate-y-4'); setTimeout(() => { toast.classList.remove('opacity-100', 'translate-y-4'); toast.classList.add('opacity-0'); }, 3000); }
+        function alertUI(msg) { showToast(msg); }
+        init();
+    </script>
+</body>
+</html>
