@@ -39,7 +39,17 @@
                 <h1 class="text-2xl font-bold text-gray-900">여행 가계부 시작하기</h1>
                 <p class="text-sm text-gray-500 mt-2">새로운 여행을 만들거나 기존 여행에 참여하세요.</p>
             </div>
-
+<!-- ================= 추가된 부분: 모든 여행 보기 ================= -->
+            <div class="bg-gray-50 p-5 rounded-2xl border border-gray-100 mb-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-bold text-teal-600">모든 여행 목록</h2>
+                    <button type="button" onclick="loadAllTrips()" class="text-xs text-gray-500 flex items-center gap-1 active:scale-95"><i class="ph-bold ph-arrows-clockwise"></i> 새로고침</button>
+                </div>
+                <div id="all-trips-list" class="space-y-3 max-h-48 overflow-y-auto hide-scrollbar">
+                    <div class="text-center text-sm text-gray-400 py-4">불러오는 중...</div>
+                </div>
+            </div>
+            <!-- ============================================================== -->
             <div class="bg-gray-50 p-5 rounded-2xl border border-gray-100 mb-6">
                 <h2 class="text-lg font-bold mb-4 text-blue-600">새 여행 만들기</h2>
                 <form id="form-create-trip" class="space-y-4">
@@ -69,17 +79,6 @@
                 </form>
             </div>
 
-<!-- ================= 추가된 부분: 모든 여행 보기 ================= -->
-            <div class="bg-gray-50 p-5 rounded-2xl border border-gray-100 mb-6">
-                <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-lg font-bold text-teal-600">모든 여행 목록</h2>
-                    <button type="button" onclick="loadAllTrips()" class="text-xs text-gray-500 flex items-center gap-1 active:scale-95"><i class="ph-bold ph-arrows-clockwise"></i> 새로고침</button>
-                </div>
-                <div id="all-trips-list" class="space-y-3 max-h-48 overflow-y-auto hide-scrollbar">
-                    <div class="text-center text-sm text-gray-400 py-4">불러오는 중...</div>
-                </div>
-            </div>
-            <!-- ============================================================== -->
 
             <div class="bg-gray-50 p-5 rounded-2xl border border-gray-100">
                 <h2 class="text-lg font-bold mb-4 text-purple-600">기존 여행 참여하기</h2>
