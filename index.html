@@ -1,0 +1,1249 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>상현 여행 가계부 (Travel Expense Tracker)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <style>
+        /* Mobile-first specific styles */
+        body { background-color: #f3f4f6; font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .app-container { max-width: 480px; margin: 0 auto; height: 100dvh; background: #ffffff; display: flex; flex-direction: column; position: relative; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+        .scrollable-content { flex: 1; overflow-y: auto; padding-bottom: 80px; /* space for bottom nav */ }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* Custom Checkbox/Pill styles for members */
+        .member-checkbox:checked + label { background-color: #3b82f6; color: white; border-color: #3b82f6; }
+        
+        /* Loading Overlay */
+        #loading-overlay { backdrop-filter: blur(4px); }
+        
+        /* Modal Transitions */
+        .modal-enter { opacity: 0; transform: scale(0.95); }
+        .modal-enter-active { opacity: 1; transform: scale(1); transition: all 0.2s ease-out; }
+    </style>
+</head>
+<body class="antialiased text-gray-800">
+
+    <div class="app-container">
+        
+        <!-- ======================= -->
+        <!-- SCREEN 1: Setup / Join -->
+        <!-- ======================= -->
+        <div id="screen-setup" class="flex-1 flex flex-col p-6 hidden overflow-y-auto">
+            <div class="text-center mt-8 mb-8">
+                <i class="ph-fill ph-wallet text-6xl text-blue-500 mb-2"></i>
+                <h1 class="text-2xl font-bold text-gray-900">여행 가계부 시작하기</h1>
+                <p class="text-sm text-gray-500 mt-2">새로운 여행을 만들거나 기존 여행에 참여하세요.</p>
+            </div>
+
+            <div class="bg-gray-50 p-5 rounded-2xl border border-gray-100 mb-6">
+                <h2 class="text-lg font-bold mb-4 text-blue-600">새 여행 만들기</h2>
+                <form id="form-create-trip" class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">여행 이름</label>
+                        <input type="text" id="setup-name" required class="w-full bg-white border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="예: 제주도 여름 휴가">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">여행 장소</label>
+                        <input type="text" id="setup-location" required class="w-full bg-white border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="예: 대한민국 제주도">
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">시작일</label>
+                            <input type="date" id="setup-start" required class="w-full bg-white border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">종료일</label>
+                            <input type="date" id="setup-end" required class="w-full bg-white border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">여행 멤버 (쉼표로 구분)</label>
+                        <input type="text" id="setup-members" required class="w-full bg-white border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="예: 철수, 영희, 민수">
+                    </div>
+                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl py-3.5 mt-2 transition-colors active:scale-[0.98]">새 여행 생성하기</button>
+                </form>
+            </div>
+
+            <div class="bg-gray-50 p-5 rounded-2xl border border-gray-100">
+                <h2 class="text-lg font-bold mb-4 text-purple-600">기존 여행 참여하기</h2>
+                <div class="flex gap-2">
+                    <input type="text" id="join-trip-id" class="flex-1 bg-white border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-purple-500 outline-none transition-all" placeholder="여행 코드 (Trip ID)">
+                    <button id="btn-join-trip" class="bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl px-5 transition-colors active:scale-[0.98]">참여</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ======================= -->
+        <!-- SCREEN 2: Main App View -->
+        <!-- ======================= -->
+        <div id="screen-main" class="flex-1 flex flex-col hidden h-full">
+            
+            <!-- Top Header -->
+            <header class="bg-white px-5 py-4 shadow-sm z-10 flex justify-between items-center border-b border-gray-100 shrink-0">
+                <div>
+                    <h1 id="header-trip-name" class="font-bold text-lg text-gray-900 leading-tight">로딩중...</h1>
+                    <p id="header-trip-dates" class="text-xs text-gray-500"></p>
+                </div>
+                <button onclick="copyTripId()" class="text-blue-600 bg-blue-50 p-2 rounded-lg text-xs font-semibold flex items-center gap-1 active:bg-blue-100 transition-colors">
+                    <i class="ph ph-copy"></i> 초대코드
+                </button>
+            </header>
+
+            <!-- Tab Contents -->
+            <div class="scrollable-content relative bg-gray-50">
+                
+                <!-- TAB 1: INPUT -->
+                <div id="tab-input" class="p-5 hidden">
+                    
+                    <!-- Mode Toggle -->
+                    <div class="flex bg-gray-200 rounded-xl p-1 mb-6">
+                        <button id="btn-mode-manual" onclick="setInputMode('manual')" class="flex-1 py-2 text-sm font-semibold rounded-lg bg-white shadow-sm text-blue-600 transition-all">수동 입력</button>
+                        <button id="btn-mode-ocr" onclick="setInputMode('ocr')" class="flex-1 py-2 text-sm font-semibold rounded-lg text-gray-600 transition-all flex items-center justify-center gap-1"><i class="ph ph-camera"></i> 영수증 인식</button>
+                    </div>
+
+                    <!-- OCR Upload Area (Hidden by default) -->
+                    <div id="ocr-area" class="hidden mb-6">
+                        <label for="ocr-upload" class="border-2 border-dashed border-blue-300 bg-blue-50 rounded-2xl p-8 flex flex-col items-center justify-center cursor-pointer hover:bg-blue-100 transition-colors active:scale-[0.98]">
+                            <i class="ph ph-receipt text-4xl text-blue-500 mb-2"></i>
+                            <span class="text-sm font-semibold text-blue-700">영수증 사진 촬영/첨부</span>
+                            <span class="text-xs text-blue-500 mt-1">AI가 자동으로 내용을 분석합니다</span>
+                            <input type="file" id="ocr-upload" accept="image/*" capture="environment" class="hidden" onchange="handleOCRUpload(event)">
+                        </label>
+                    </div>
+
+                    <!-- Input Form -->
+                    <form id="form-expense" class="space-y-5 bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                        <input type="hidden" id="expense-id"> <!-- For editing -->
+                        
+                        <div class="grid grid-cols-3 gap-3">
+                            <div class="col-span-2">
+                                <label class="block text-xs font-semibold text-gray-600 mb-1">금액</label>
+                                <input type="number" id="inp-amount" required class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="0">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-600 mb-1">통화</label>
+                                <select id="inp-currency" class="w-full border border-gray-300 rounded-xl px-3 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                                    <option value="KRW">KRW (₩)</option>
+                                    <option value="USD">USD ($)</option>
+                                    <option value="JPY">JPY (¥)</option>
+                                    <option value="PHP">PHP (₱)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">내용</label>
+                            <input type="text" id="inp-desc" required class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="어디서 무엇을 샀나요?">
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-600 mb-1">카테고리</label>
+                                <select id="inp-category" required class="w-full border border-gray-300 rounded-xl px-3 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                                    <option value="식비">식비 🍔</option>
+                                    <option value="숙소">숙소 🏨</option>
+                                    <option value="쇼핑">쇼핑 🛍️</option>
+                                    <option value="티켓">티켓/교통 🎫</option>
+                                    <option value="기타">기타 📦</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-600 mb-1">결제수단</label>
+                                <select id="inp-method" required class="w-full border border-gray-300 rounded-xl px-3 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                                    <option value="카드">카드 💳</option>
+                                    <option value="현금">현금 💵</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">결제자 (누가 냈나요?)</label>
+                            <select id="inp-payer" required class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                                <!-- Populated dynamically -->
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-2">적용되는 멤버 (N빵 대상)</label>
+                            <div id="inp-members-container" class="flex flex-wrap gap-2">
+                                <!-- Checkboxes populated dynamically -->
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">장소</label>
+                            <div class="flex gap-2">
+                                <input type="text" id="inp-location" class="flex-1 border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="장소 입력">
+                                <button type="button" onclick="fetchGPSLocation()" class="bg-gray-100 border border-gray-300 text-gray-700 px-4 rounded-xl hover:bg-gray-200 transition-colors flex items-center justify-center active:scale-95">
+                                    <i class="ph ph-map-pin text-lg"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">결제 일시</label>
+                            <input type="datetime-local" id="inp-time" required class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                        </div>
+
+                        <div class="pt-4 flex gap-3">
+                            <button type="button" id="btn-cancel-edit" onclick="cancelEdit()" class="hidden flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold rounded-xl py-3.5 transition-colors active:scale-[0.98]">취소</button>
+                            <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl py-3.5 shadow-md shadow-blue-200 transition-colors active:scale-[0.98]">내역 저장하기</button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- TAB 2: BUDGET -->
+                <div id="tab-budget" class="p-5 hidden">
+                    <div class="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-3xl p-6 text-white shadow-lg mb-6 relative overflow-hidden">
+                        <div class="absolute -right-6 -top-6 text-white/10 text-9xl"><i class="ph-fill ph-piggy-bank"></i></div>
+                        <h2 class="text-sm font-semibold opacity-90 mb-1 relative z-10">총 예산 설정</h2>
+                        <div class="flex items-end gap-2 mb-6 relative z-10">
+                            <input type="number" id="budget-amount" class="bg-transparent border-b-2 border-white/30 text-3xl font-bold w-full outline-none focus:border-white transition-colors pb-1" placeholder="0" onchange="updateBudget()">
+                            <select id="budget-currency" class="bg-white/20 border-none rounded-lg text-sm font-semibold py-1 px-2 outline-none cursor-pointer" onchange="updateBudget()">
+                                <option value="KRW" class="text-gray-800">KRW</option>
+                                <option value="USD" class="text-gray-800">USD</option>
+                                <option value="JPY" class="text-gray-800">JPY</option>
+                                <option value="PHP" class="text-gray-800">PHP</option>
+                            </select>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4 border-t border-white/20 pt-4 mt-2 relative z-10">
+                            <div>
+                                <p class="text-xs opacity-80 mb-1">총 사용 금액 (환산)</p>
+                                <p id="budget-spent" class="text-lg font-bold">₩0</p>
+                            </div>
+                            <div>
+                                <p class="text-xs opacity-80 mb-1">남은 예산</p>
+                                <p id="budget-remaining" class="text-lg font-bold">₩0</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h3 class="font-bold text-gray-800 mb-4 px-1">카테고리별 사용 내역</h3>
+                    <div id="category-list" class="space-y-3">
+                        <!-- Populated dynamically -->
+                    </div>
+                    
+                    <div class="mt-6 bg-blue-50 text-blue-800 text-xs p-3 rounded-lg border border-blue-100 flex gap-2 items-start">
+                        <i class="ph-fill ph-info mt-0.5"></i>
+                        <p>환산 금액은 편의를 위해 고정 환율(USD=1400원, JPY=9.3원, PHP=24.5원)로 계산된 예상 금액입니다. 실제 정확한 사용액은 전체 내역을 참고하세요.</p>
+                    </div>
+                </div>
+
+                <!-- TAB 3: HISTORY & SETTLEMENT -->
+                <div id="tab-history" class="p-5 hidden">
+                    <div class="flex justify-between items-center mb-4">
+                        <div class="flex bg-gray-200 rounded-lg p-1">
+                            <button id="btn-sort-date" onclick="setSortMode('date')" class="px-3 py-1.5 text-xs font-semibold rounded-md bg-white shadow-sm text-gray-800">최신순</button>
+                            <button id="btn-sort-category" onclick="setSortMode('category')" class="px-3 py-1.5 text-xs font-semibold rounded-md text-gray-500 hover:text-gray-800">카테고리별</button>
+                        </div>
+                        <button onclick="showSettlement()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold py-2 px-4 rounded-xl shadow-sm active:scale-95 transition-all flex items-center gap-1">
+                            <i class="ph-bold ph-calculator"></i> 정산하기
+                        </button>
+                    </div>
+
+                    <div id="history-list" class="space-y-3">
+                        <!-- Populated dynamically -->
+                    </div>
+                    
+                    <div id="history-empty" class="hidden text-center py-12">
+                        <i class="ph ph-receipt text-5xl text-gray-300 mb-3"></i>
+                        <p class="text-gray-500 text-sm">아직 등록된 지출 내역이 없습니다.</p>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Bottom Navigation -->
+            <nav class="bg-white border-t border-gray-200 px-6 py-3 flex justify-between items-center pb-safe absolute bottom-0 w-full z-20 shadow-[0_-5px_15px_rgba(0,0,0,0.05)]">
+                <button onclick="switchTab('input')" id="nav-input" class="flex flex-col items-center p-2 text-blue-600 transition-colors w-16">
+                    <i class="ph-fill ph-pencil-simple text-2xl mb-1 transition-transform"></i>
+                    <span class="text-[10px] font-bold">입력</span>
+                </button>
+                <button onclick="switchTab('budget')" id="nav-budget" class="flex flex-col items-center p-2 text-gray-400 hover:text-gray-600 transition-colors w-16">
+                    <i class="ph ph-chart-pie-slice text-2xl mb-1 transition-transform"></i>
+                    <span class="text-[10px] font-semibold">예산</span>
+                </button>
+                <button onclick="switchTab('history')" id="nav-history" class="flex flex-col items-center p-2 text-gray-400 hover:text-gray-600 transition-colors w-16">
+                    <i class="ph ph-list-dashes text-2xl mb-1 transition-transform"></i>
+                    <span class="text-[10px] font-semibold">내역/정산</span>
+                </button>
+            </nav>
+        </div>
+
+        <!-- ======================= -->
+        <!-- MODALS & OVERLAYS       -->
+        <!-- ======================= -->
+        
+        <!-- Loading Overlay -->
+        <div id="loading-overlay" class="absolute inset-0 bg-white/80 z-50 flex flex-col items-center justify-center hidden">
+            <div class="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
+            <p id="loading-text" class="text-sm font-semibold text-gray-700">로딩 중...</p>
+        </div>
+
+        <!-- Settlement Modal -->
+        <div id="settle-modal" class="absolute inset-0 z-40 hidden">
+            <div class="absolute inset-0 bg-black/50" onclick="closeSettlement()"></div>
+            <div class="absolute bottom-0 w-full bg-white rounded-t-3xl shadow-2xl p-6 transform transition-transform translate-y-full" id="settle-modal-content" style="max-height: 85dvh; overflow-y: auto;">
+                <div class="w-12 h-1.5 bg-gray-300 rounded-full mx-auto mb-6"></div>
+                <div class="text-center mb-6">
+                    <div class="inline-flex items-center justify-center w-14 h-14 bg-indigo-100 text-indigo-600 rounded-full mb-3">
+                        <i class="ph-fill ph-hand-coins text-3xl"></i>
+                    </div>
+                    <h2 class="text-xl font-bold text-gray-900">최종 정산 결과</h2>
+                    <p class="text-xs text-gray-500 mt-1">누가 누구에게 얼마를 보내야 할까요?</p>
+                </div>
+                
+                <div id="settle-results" class="space-y-3 mb-8">
+                    <!-- Populated dynamically -->
+                </div>
+                
+                <button onclick="closeSettlement()" class="w-full bg-gray-900 text-white font-bold py-3.5 rounded-xl active:scale-[0.98] transition-transform">닫기</button>
+            </div>
+        </div>
+        
+        <!-- Toast Notification -->
+        <div id="toast" class="absolute top-4 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-5 py-3 rounded-xl shadow-lg text-sm font-semibold opacity-0 transition-opacity duration-300 pointer-events-none z-50 flex items-center gap-2">
+            <i class="ph-fill ph-check-circle text-green-400 text-lg"></i>
+            <span id="toast-msg">저장되었습니다</span>
+        </div>
+
+    </div>
+
+    <!-- Firebase SDK Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // ==========================================
+        // CONFIG & STATE
+        // ==========================================
+        const appId = "1:793454515760:web:2c727f6567e378cd5ffff5";
+        const firebaseConfig = {
+                apiKey: "AIzaSyC5rDmh2nEMawp2kqnw_LycoH4QcdtKtB4",
+                authDomain: "trip-budget-52f07.firebaseapp.com",
+                databaseURL: "https://trip-budget-52f07-default-rtdb.firebaseio.com",
+                projectId: "trip-budget-52f07",
+                storageBucket: "trip-budget-52f07.firebasestorage.app",
+                messagingSenderId: "793454515760",
+                appId: "1:793454515760:web:2c727f6567e378cd5ffff5",
+                measurementId: "G-S52ENGC1GR",
+        };
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        const string1 = "AQ.Ab8RN6K";
+        const string2 = "5h0S6vkOBR";
+        const string3 = "rRNm_Zl83w2uP9toPg7MgPi";
+        const string4 = "SBf5fDTpiw"
+        const geminiApiKey = string1 + string2 + string3 + string4; // Left empty for Canvas auto-injection
+
+        let app;
+        let db;
+        let auth;
+        let currentUser;
+        
+        const state = {
+            tripId: null,
+            tripData: null, // { name, location, dates, members, budget, budgetCurrency }
+            expenses: [],
+            currentTab: 'input',
+            inputMode: 'manual',
+            sortMode: 'date', // 'date' or 'category'
+            editingExpenseId: null
+        };
+
+        const MOCK_EXCHANGE_RATES = {
+            KRW: 1,
+            USD: 1400,
+            JPY: 9.3,
+            PHP: 24.5
+        };
+        
+        const CATEGORY_COLORS = {
+            '식비': 'bg-orange-100 text-orange-700',
+            '숙소': 'bg-indigo-100 text-indigo-700',
+            '쇼핑': 'bg-pink-100 text-pink-700',
+            '티켓': 'bg-emerald-100 text-emerald-700',
+            '기타': 'bg-gray-100 text-gray-700'
+        };
+        const CATEGORY_ICONS = {
+            '식비': 'ph-hamburger',
+            '숙소': 'ph-bed',
+            '쇼핑': 'ph-tote',
+            '티켓': 'ph-ticket',
+            '기타': 'ph-package'
+        };
+
+        // ==========================================
+        // INITIALIZATION
+        // ==========================================
+        async function init() {
+            showLoading("앱 초기화 중...");
+            try {
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                currentUser = auth.currentUser;
+                
+                // Check local storage for last opened trip for convenience
+                const savedTripId = localStorage.getItem('last_trip_id');
+                if (savedTripId) {
+                    await loadTrip(savedTripId);
+                } else {
+                    showScreen('setup');
+                }
+            } catch (error) {
+                console.error("Initialization error:", error);
+                alertUI("초기화 실패. 새로고침 해주세요.");
+            } finally {
+                hideLoading();
+            }
+            setupEventListeners();
+        }
+
+        // ==========================================
+        // DOM & EVENT LISTENERS
+        // ==========================================
+        function setupEventListeners() {
+            document.getElementById('form-create-trip').addEventListener('submit', handleCreateTrip);
+            document.getElementById('btn-join-trip').addEventListener('click', handleJoinTrip);
+            document.getElementById('form-expense').addEventListener('submit', handleSaveExpense);
+            
+            // Set default time to now
+            const now = new Date();
+            now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+            document.getElementById('inp-time').value = now.toISOString().slice(0,16);
+        }
+
+        window.setInputMode = (mode) => {
+            state.inputMode = mode;
+            const btnManual = document.getElementById('btn-mode-manual');
+            const btnOcr = document.getElementById('btn-mode-ocr');
+            const ocrArea = document.getElementById('ocr-area');
+            
+            if(mode === 'manual') {
+                btnManual.className = "flex-1 py-2 text-sm font-semibold rounded-lg bg-white shadow-sm text-blue-600 transition-all";
+                btnOcr.className = "flex-1 py-2 text-sm font-semibold rounded-lg text-gray-600 transition-all flex items-center justify-center gap-1";
+                ocrArea.classList.add('hidden');
+            } else {
+                btnOcr.className = "flex-1 py-2 text-sm font-semibold rounded-lg bg-white shadow-sm text-blue-600 transition-all flex items-center justify-center gap-1";
+                btnManual.className = "flex-1 py-2 text-sm font-semibold rounded-lg text-gray-600 transition-all";
+                ocrArea.classList.remove('hidden');
+            }
+        };
+
+        window.switchTab = (tabId) => {
+            state.currentTab = tabId;
+            // Hide all tabs
+            ['input', 'budget', 'history'].forEach(id => {
+                document.getElementById(`tab-${id}`).classList.add('hidden');
+                
+                // Reset Nav Styles
+                const navItem = document.getElementById(`nav-${id}`);
+                const icon = navItem.querySelector('i');
+                navItem.classList.remove('text-blue-600');
+                navItem.classList.add('text-gray-400');
+                icon.classList.remove('ph-fill', 'scale-110');
+                icon.classList.add('ph');
+            });
+            
+            // Show Active
+            document.getElementById(`tab-${tabId}`).classList.remove('hidden');
+            const activeNav = document.getElementById(`nav-${tabId}`);
+            activeNav.classList.remove('text-gray-400');
+            activeNav.classList.add('text-blue-600');
+            const activeIcon = activeNav.querySelector('i');
+            activeIcon.classList.remove('ph');
+            activeIcon.classList.add('ph-fill', 'scale-110');
+
+            if (tabId === 'budget') renderBudget();
+            if (tabId === 'history') renderHistory();
+        };
+
+        window.setSortMode = (mode) => {
+            state.sortMode = mode;
+            const btnDate = document.getElementById('btn-sort-date');
+            const btnCat = document.getElementById('btn-sort-category');
+            
+            if(mode === 'date') {
+                btnDate.className = "px-3 py-1.5 text-xs font-semibold rounded-md bg-white shadow-sm text-gray-800 transition-all";
+                btnCat.className = "px-3 py-1.5 text-xs font-semibold rounded-md text-gray-500 hover:text-gray-800 transition-all";
+            } else {
+                btnCat.className = "px-3 py-1.5 text-xs font-semibold rounded-md bg-white shadow-sm text-gray-800 transition-all";
+                btnDate.className = "px-3 py-1.5 text-xs font-semibold rounded-md text-gray-500 hover:text-gray-800 transition-all";
+            }
+            renderHistory();
+        };
+
+        function showScreen(screenId) {
+            document.getElementById('screen-setup').classList.add('hidden');
+            document.getElementById('screen-main').classList.add('hidden');
+            document.getElementById(`screen-${screenId}`).classList.remove('hidden');
+        }
+
+        // ==========================================
+        // TRIP MANAGEMENT
+        // ==========================================
+        async function handleCreateTrip(e) {
+            e.preventDefault();
+            if (!currentUser) return;
+            
+            const name = document.getElementById('setup-name').value;
+            const location = document.getElementById('setup-location').value;
+            const start = document.getElementById('setup-start').value;
+            const end = document.getElementById('setup-end').value;
+            const membersRaw = document.getElementById('setup-members').value;
+            const members = membersRaw.split(',').map(m => m.trim()).filter(m => m !== '');
+
+            if(members.length === 0) return alertUI("최소 한 명의 멤버를 입력하세요.");
+
+            const tripId = generateId();
+            const tripData = {
+                name, location, dates: `${start} ~ ${end}`, members, budget: 0, budgetCurrency: 'KRW',
+                createdAt: new Date().toISOString()
+            };
+
+            showLoading("여행 생성 중...");
+            try {
+                const tripRef = doc(db, 'artifacts', appId, 'public', 'data', 'trips', tripId);
+                await setDoc(tripRef, tripData);
+                await loadTrip(tripId);
+            } catch (error) {
+                console.error(error);
+                alertUI("생성 중 오류가 발생했습니다.");
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function handleJoinTrip() {
+            const tripId = document.getElementById('join-trip-id').value.trim();
+            if (!tripId) return alertUI("여행 코드를 입력하세요.");
+            showLoading("여행 불러오는 중...");
+            await loadTrip(tripId);
+            hideLoading();
+        }
+
+        async function loadTrip(tripId) {
+            if (!currentUser) return;
+            try {
+                const tripRef = doc(db, 'artifacts', appId, 'public', 'data', 'trips', tripId);
+                
+                // Realtime sync for trip info (budget updates, etc)
+                onSnapshot(tripRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        state.tripId = tripId;
+                        state.tripData = docSnap.data();
+                        localStorage.setItem('last_trip_id', tripId);
+                        
+                        // Update UI
+                        document.getElementById('header-trip-name').textContent = state.tripData.name;
+                        document.getElementById('header-trip-dates').textContent = state.tripData.dates;
+                        document.getElementById('budget-amount').value = state.tripData.budget || '';
+                        document.getElementById('budget-currency').value = state.tripData.budgetCurrency || 'KRW';
+                        
+                        populateMemberSelectors();
+                        showScreen('main');
+                        
+                        // If expenses listener not active, start it
+                        if(state.expenses.length === 0 && !window.unsubExpenses) {
+                            listenToExpenses(tripId);
+                        } else {
+                            if(state.currentTab === 'budget') renderBudget();
+                        }
+                    } else {
+                        if(state.tripId === null) {
+                            alertUI("유효하지 않은 여행 코드입니다.");
+                            localStorage.removeItem('last_trip_id');
+                            showScreen('setup');
+                        }
+                    }
+                }, (error) => console.error("Trip snapshot error:", error));
+            } catch (error) {
+                console.error(error);
+                alertUI("여행 정보를 불러오는 데 실패했습니다.");
+            }
+        }
+
+        function populateMemberSelectors() {
+            const members = state.tripData.members || [];
+            
+            // Payer Select
+            const payerSelect = document.getElementById('inp-payer');
+            payerSelect.innerHTML = members.map(m => `<option value="${m}">${m}</option>`).join('');
+            
+            // Applicable Members Checkboxes
+            const membersContainer = document.getElementById('inp-members-container');
+            membersContainer.innerHTML = members.map((m, idx) => `
+                <div class="relative">
+                    <input type="checkbox" id="mem-${idx}" value="${m}" class="member-checkbox hidden" checked>
+                    <label for="mem-${idx}" class="inline-block px-3 py-1.5 rounded-full border border-gray-300 text-xs font-semibold text-gray-600 cursor-pointer transition-colors bg-white">
+                        ${m}
+                    </label>
+                </div>
+            `).join('');
+        }
+
+        window.copyTripId = () => {
+            if(!state.tripId) return;
+            const dummy = document.createElement('input');
+            document.body.appendChild(dummy);
+            dummy.value = state.tripId;
+            dummy.select();
+            document.execCommand('copy');
+            document.body.removeChild(dummy);
+            showToast("초대 코드(ID)가 복사되었습니다!");
+        };
+
+        // ==========================================
+        // EXPENSES DATA & SYNC
+        // ==========================================
+        function listenToExpenses(tripId) {
+            if (!currentUser) return;
+            const expensesRef = collection(db, 'artifacts', appId, 'public', 'data', 'expenses');
+            
+            window.unsubExpenses = onSnapshot(expensesRef, (snapshot) => {
+                const allExpenses = [];
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    // FILTER in memory as per Rule 2
+                    if (data.tripId === tripId) {
+                        allExpenses.push({ id: doc.id, ...data });
+                    }
+                });
+                
+                // Sort by time descending
+                allExpenses.sort((a, b) => new Date(b.time) - new Date(a.time));
+                state.expenses = allExpenses;
+                
+                if (state.currentTab === 'history') renderHistory();
+                if (state.currentTab === 'budget') renderBudget();
+                
+            }, (error) => console.error("Expenses snapshot error:", error));
+        }
+
+        async function handleSaveExpense(e) {
+            e.preventDefault();
+            if (!currentUser || !state.tripId) return;
+
+            const amount = parseFloat(document.getElementById('inp-amount').value);
+            const currency = document.getElementById('inp-currency').value;
+            const desc = document.getElementById('inp-desc').value;
+            const category = document.getElementById('inp-category').value;
+            const method = document.getElementById('inp-method').value;
+            const payer = document.getElementById('inp-payer').value;
+            const location = document.getElementById('inp-location').value;
+            const time = document.getElementById('inp-time').value;
+            
+            const involvedCheckboxes = document.querySelectorAll('.member-checkbox:checked');
+            const involved = Array.from(involvedCheckboxes).map(cb => cb.value);
+
+            if (involved.length === 0) return alertUI("적용되는 멤버를 최소 1명 선택하세요.");
+
+            const expenseData = {
+                tripId: state.tripId,
+                amount, currency, desc, category, method, payer, involved, location, time,
+                updatedAt: new Date().toISOString()
+            };
+
+            const expenseId = document.getElementById('expense-id').value;
+            
+            showLoading("저장 중...");
+            try {
+                if (expenseId) {
+                    // Update
+                    const ref = doc(db, 'artifacts', appId, 'public', 'data', 'expenses', expenseId);
+                    await updateDoc(ref, expenseData);
+                    showToast("수정되었습니다.");
+                } else {
+                    // Create new ID
+                    const newId = generateId();
+                    const ref = doc(db, 'artifacts', appId, 'public', 'data', 'expenses', newId);
+                    expenseData.createdAt = new Date().toISOString();
+                    await setDoc(ref, expenseData);
+                    showToast("지출이 추가되었습니다.");
+                }
+                
+                // Reset Form
+                resetInputForm();
+                switchTab('history');
+            } catch (error) {
+                console.error(error);
+                alertUI("저장 실패");
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function resetInputForm() {
+            document.getElementById('form-expense').reset();
+            document.getElementById('expense-id').value = '';
+            
+            // Reset checkboxes
+            document.querySelectorAll('.member-checkbox').forEach(cb => cb.checked = true);
+            
+            // Set time to now
+            const now = new Date();
+            now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+            document.getElementById('inp-time').value = now.toISOString().slice(0,16);
+            
+            document.getElementById('btn-cancel-edit').classList.add('hidden');
+        }
+
+        window.editExpense = (id) => {
+            const expense = state.expenses.find(e => e.id === id);
+            if(!expense) return;
+            
+            document.getElementById('expense-id').value = expense.id;
+            document.getElementById('inp-amount').value = expense.amount;
+            document.getElementById('inp-currency').value = expense.currency;
+            document.getElementById('inp-desc').value = expense.desc;
+            document.getElementById('inp-category').value = expense.category;
+            document.getElementById('inp-method').value = expense.method;
+            document.getElementById('inp-payer').value = expense.payer;
+            document.getElementById('inp-location').value = expense.location || '';
+            document.getElementById('inp-time').value = expense.time;
+            
+            // Set checkboxes
+            document.querySelectorAll('.member-checkbox').forEach(cb => {
+                cb.checked = expense.involved.includes(cb.value);
+            });
+            
+            document.getElementById('btn-cancel-edit').classList.remove('hidden');
+            switchTab('input');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        };
+
+        window.cancelEdit = () => {
+            resetInputForm();
+            switchTab('history');
+        };
+
+        window.deleteExpense = async (id) => {
+            if (!currentUser) return;
+            if(confirm("정말로 이 지출 내역을 삭제하시겠습니까?")) {
+                try {
+                    const ref = doc(db, 'artifacts', appId, 'public', 'data', 'expenses', id);
+                    await deleteDoc(ref);
+                    showToast("삭제되었습니다.");
+                } catch(e) {
+                    console.error(e);
+                    alertUI("삭제 실패");
+                }
+            }
+        };
+
+        // ==========================================
+        // GPS GEOLOCATION
+        // ==========================================
+        window.fetchGPSLocation = () => {
+            const locInput = document.getElementById('inp-location');
+            if(!navigator.geolocation) {
+                return alertUI("위치 정보를 지원하지 않는 기기입니다.");
+            }
+            
+            locInput.value = "위치 찾는 중...";
+            
+            navigator.geolocation.getCurrentPosition(async (pos) => {
+                const { latitude, longitude } = pos.coords;
+                try {
+                    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`);
+                    if(res.ok) {
+                        const data = await res.json();
+                        // Extract a reasonably short address
+                        let shortAddress = data.address.city || data.address.town || data.address.county || "";
+                        if(data.address.road || data.address.suburb) {
+                            shortAddress += " " + (data.address.road || data.address.suburb);
+                        }
+                        if(data.name) shortAddress = data.name + " (" + shortAddress.trim() + ")";
+                        
+                        locInput.value = shortAddress || data.display_name.split(',').slice(0,2).join(', ');
+                    } else {
+                        throw new Error("Geocode failed");
+                    }
+                } catch(e) {
+                    locInput.value = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+                }
+            }, (err) => {
+                console.error(err);
+                locInput.value = "";
+                alertUI("위치를 가져오지 못했습니다. 권한을 확인해주세요.");
+            }, { timeout: 10000 });
+        };
+
+
+        // ==========================================
+        // OCR (GEMINI API)
+        // ==========================================
+        window.handleOCRUpload = async (event) => {
+            const file = event.target.files[0];
+            if(!file) return;
+            
+            showLoading("영수증 분석 중... (약 5~10초 소요)");
+            try {
+                const base64Data = await fileToBase64(file);
+                // Strip the data URL prefix (e.g., "data:image/jpeg;base64,")
+                const pureBase64 = base64Data.split(',')[1];
+                
+                const payload = {
+                    contents: [{
+                        role: "user",
+                        parts: [
+                            { text: `이 영수증 이미지를 분석해서 다음 정보를 추출해줘. JSON 형식으로만 반환해. markdown(backticks) 쓰지마.
+                            - amount: 숫자 (가격)
+                            - currency: 'KRW', 'USD', 'JPY', 'PHP' 중 하나
+                            - desc: 영수증의 주요 항목 또는 가게 이름 (짧은 문자열)
+                            - category: '식비', '숙소', '쇼핑', '티켓', '기타' 중 가장 알맞은 것 하나
+                            - method: '카드' 또는 '현금'
+                            - location: 가게 주소나 장소 이름 (모르면 빈 문자열)
+                            - time: YYYY-MM-DDTHH:MM 형식의 결제 시간 (모르면 현재 시간)` },
+                            {
+                                inlineData: {
+                                    mimeType: file.type,
+                                    data: pureBase64
+                                }
+                            }
+                        ]
+                    }],
+                    generationConfig: {
+                        responseMimeType: "application/json"
+                    }
+                };
+                
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${geminiApiKey}`;
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const result = await response.json();
+                if(result.candidates && result.candidates[0].content.parts[0].text) {
+                    const jsonText = result.candidates[0].content.parts[0].text;
+                    const data = JSON.parse(jsonText);
+                    
+                    // Populate Form
+                    document.getElementById('inp-amount').value = data.amount || '';
+                    if(data.currency) document.getElementById('inp-currency').value = data.currency;
+                    if(data.desc) document.getElementById('inp-desc').value = data.desc;
+                    if(data.category && document.querySelector(`#inp-category option[value="${data.category}"]`)) {
+                        document.getElementById('inp-category').value = data.category;
+                    }
+                    if(data.method && document.querySelector(`#inp-method option[value="${data.method}"]`)) {
+                        document.getElementById('inp-method').value = data.method;
+                    }
+                    if(data.location) document.getElementById('inp-location').value = data.location;
+                    if(data.time) document.getElementById('inp-time').value = data.time.slice(0, 16);
+                    
+                    showToast("영수증 분석 완료. 내용을 확인하고 저장해주세요.");
+                    setInputMode('manual'); // Switch back to manual to review
+                    
+                } else {
+                    throw new Error("Invalid API response");
+                }
+                
+            } catch(e) {
+                console.error(e);
+                alertUI("영수증 분석에 실패했습니다. 수동으로 입력해주세요.");
+            } finally {
+                hideLoading();
+                // Reset file input
+                event.target.value = '';
+            }
+        };
+
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = error => reject(error);
+            });
+        }
+
+
+        // ==========================================
+        // BUDGET RENDERING
+        // ==========================================
+        window.updateBudget = async () => {
+            if(!currentUser || !state.tripId) return;
+            const amt = parseFloat(document.getElementById('budget-amount').value) || 0;
+            const cur = document.getElementById('budget-currency').value;
+            
+            try {
+                const tripRef = doc(db, 'artifacts', appId, 'public', 'data', 'trips', state.tripId);
+                await updateDoc(tripRef, { budget: amt, budgetCurrency: cur });
+                // Note: The UI updates automatically via the trip snapshot listener
+            } catch(e) {
+                console.error(e);
+            }
+        };
+
+        function formatMoney(amount, currency) {
+            if(currency === 'KRW') return `₩${Math.round(amount).toLocaleString()}`;
+            if(currency === 'USD') return `$${amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            if(currency === 'JPY') return `¥${Math.round(amount).toLocaleString()}`;
+            if(currency === 'PHP') return `₱${amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            return amount.toLocaleString();
+        }
+
+        function renderBudget() {
+            const listEl = document.getElementById('category-list');
+            listEl.innerHTML = '';
+            
+            const budgetAmt = state.tripData.budget || 0;
+            const budgetCur = state.tripData.budgetCurrency || 'KRW';
+            
+            // Calculate sums
+            const sums = { KRW: 0, USD: 0, JPY: 0, PHP: 0 };
+            const catSums = {};
+            
+            state.expenses.forEach(ex => {
+                if(sums[ex.currency] === undefined) sums[ex.currency] = 0;
+                sums[ex.currency] += ex.amount;
+                if(!catSums[ex.category]) catSums[ex.category] = { KRW: 0, USD: 0, JPY: 0, PHP: 0 };
+                if(catSums[ex.category][ex.currency] === undefined) catSums[ex.category][ex.currency] = 0;
+                catSums[ex.category][ex.currency] += ex.amount;
+            });
+            
+            // Calculate Total Estimated in Budget Currency
+            let totalEstInKRW = 0;
+            Object.keys(sums).forEach(cur => {
+                totalEstInKRW += sums[cur] * (MOCK_EXCHANGE_RATES[cur] || 1);
+            });
+            const totalEst = totalEstInKRW / (MOCK_EXCHANGE_RATES[budgetCur] || 1);
+            
+            const remaining = budgetAmt - totalEst;
+            
+            // Render Top Card
+            let spentText = [];
+            Object.keys(sums).forEach(cur => {
+                if(sums[cur] > 0) spentText.push(formatMoney(sums[cur], cur));
+            });
+            if(spentText.length === 0) spentText.push(formatMoney(0, budgetCur));
+            
+            let spentHtml = spentText.join(' <span class="text-white/70 text-sm font-normal">&</span> ');
+            
+            // Add total estimate if multiple currencies exist or if budget currency is different
+            const activeCurrencies = Object.keys(sums).filter(cur => sums[cur] > 0);
+            if(activeCurrencies.length > 1 || (activeCurrencies.length === 1 && activeCurrencies[0] !== budgetCur)) {
+                spentHtml += `<div class="text-xs opacity-80 mt-0.5">(총 ${formatMoney(totalEst, budgetCur)})</div>`;
+            }
+            
+            document.getElementById('budget-spent').innerHTML = spentHtml;
+            
+            const remEl = document.getElementById('budget-remaining');
+            remEl.innerHTML = formatMoney(remaining, budgetCur);
+            if(remaining < 0) remEl.className = "text-lg font-bold text-red-300";
+            else remEl.className = "text-lg font-bold text-white";
+            
+            // Render Categories
+            const categories = ['식비', '숙소', '쇼핑', '티켓', '기타'];
+            categories.forEach(cat => {
+                const s = catSums[cat];
+                if(!s) return;
+                
+                let amounts = [];
+                let catEstInKRW = 0;
+                Object.keys(s).forEach(cur => {
+                    if(s[cur] > 0) {
+                        amounts.push(formatMoney(s[cur], cur));
+                        catEstInKRW += s[cur] * (MOCK_EXCHANGE_RATES[cur] || 1);
+                    }
+                });
+                if(amounts.length === 0) return;
+                
+                const catEst = catEstInKRW / (MOCK_EXCHANGE_RATES[budgetCur] || 1);
+                const pct = totalEst > 0 ? Math.min(100, Math.round((catEst / totalEst) * 100)) : 0;
+                
+                const colorClass = CATEGORY_COLORS[cat] || CATEGORY_COLORS['기타'];
+                const iconClass = CATEGORY_ICONS[cat] || CATEGORY_ICONS['기타'];
+                
+                const html = `
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4">
+                        <div class="w-12 h-12 rounded-full flex items-center justify-center text-2xl ${colorClass}">
+                            <i class="ph-fill ${iconClass}"></i>
+                        </div>
+                        <div class="flex-1">
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="font-bold text-gray-800 text-sm">${cat}</span>
+                                <span class="font-bold text-gray-900 text-sm text-right">${amounts.join('<br>')}</span>
+                            </div>
+                            <div class="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                                <div class="bg-blue-500 h-1.5 rounded-full" style="width: ${pct}%"></div>
+                            </div>
+                            <div class="text-[10px] text-gray-400 mt-1 text-right">총 지출의 ${pct}%</div>
+                        </div>
+                    </div>
+                `;
+                listEl.insertAdjacentHTML('beforeend', html);
+            });
+            
+            if(listEl.innerHTML === '') {
+                listEl.innerHTML = `<div class="text-center text-sm text-gray-400 py-4">사용 내역이 없습니다.</div>`;
+            }
+        }
+
+
+        // ==========================================
+        // HISTORY RENDERING
+        // ==========================================
+        function renderHistory() {
+            const listEl = document.getElementById('history-list');
+            const emptyEl = document.getElementById('history-empty');
+            
+            if (state.expenses.length === 0) {
+                listEl.innerHTML = '';
+                emptyEl.classList.remove('hidden');
+                return;
+            } else {
+                emptyEl.classList.add('hidden');
+            }
+            
+            let grouped = {};
+            
+            if(state.sortMode === 'date') {
+                // Group by date (YYYY-MM-DD)
+                state.expenses.forEach(ex => {
+                    const date = ex.time.split('T')[0];
+                    if(!grouped[date]) grouped[date] = [];
+                    grouped[date].push(ex);
+                });
+            } else {
+                // Group by Category
+                state.expenses.forEach(ex => {
+                    const cat = ex.category;
+                    if(!grouped[cat]) grouped[cat] = [];
+                    grouped[cat].push(ex);
+                });
+            }
+            
+            let html = '';
+            
+            // Sort keys descending for dates, custom order for categories
+            let keys = Object.keys(grouped);
+            if(state.sortMode === 'date') {
+                keys.sort((a,b) => b.localeCompare(a));
+            } else {
+                const catOrder = ['식비', '숙소', '쇼핑', '티켓', '기타'];
+                keys.sort((a,b) => catOrder.indexOf(a) - catOrder.indexOf(b));
+            }
+            
+            keys.forEach(key => {
+                let groupTitle = key;
+                if(state.sortMode === 'date') {
+                    // Format date nicer
+                    const d = new Date(key);
+                    groupTitle = `${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일`;
+                }
+                
+                html += `<div class="text-xs font-bold text-gray-500 mb-2 mt-4 px-1">${groupTitle}</div>`;
+                
+                grouped[key].forEach(ex => {
+                    const timeStr = ex.time.split('T')[1]; // HH:MM
+                    const colorClass = CATEGORY_COLORS[ex.category] || CATEGORY_COLORS['기타'];
+                    const iconClass = CATEGORY_ICONS[ex.category] || CATEGORY_ICONS['기타'];
+                    
+                    html += `
+                        <div class="bg-white p-3.5 rounded-xl shadow-sm border border-gray-100 flex items-center gap-3 relative overflow-hidden group">
+                            <div class="w-10 h-10 rounded-full flex items-center justify-center text-xl shrink-0 ${colorClass}">
+                                <i class="ph-fill ${iconClass}"></i>
+                            </div>
+                            <div class="flex-1 min-w-0" onclick="editExpense('${ex.id}')">
+                                <div class="flex justify-between items-start mb-0.5">
+                                    <div class="font-bold text-gray-800 text-sm truncate pr-2">${ex.desc}</div>
+                                    <div class="font-bold text-gray-900 text-sm shrink-0">${formatMoney(ex.amount, ex.currency)}</div>
+                                </div>
+                                <div class="flex justify-between items-center text-[10px] text-gray-500">
+                                    <div class="truncate">
+                                        <span class="font-semibold text-blue-600">${ex.payer}</span> 결제 • 
+                                        <span>${ex.involved.length}명 N빵</span>
+                                    </div>
+                                    <span>${timeStr}</span>
+                                </div>
+                            </div>
+                            <div class="absolute right-0 top-0 bottom-0 bg-red-500 w-12 flex items-center justify-center text-white transform translate-x-full group-hover:translate-x-0 transition-transform cursor-pointer" onclick="deleteExpense('${ex.id}')">
+                                <i class="ph-fill ph-trash text-lg"></i>
+                            </div>
+                        </div>
+                    `;
+                });
+            });
+            
+            listEl.innerHTML = html;
+        }
+
+        // ==========================================
+        // SETTLEMENT (정산) ALGORITHM
+        // ==========================================
+        window.showSettlement = () => {
+            const resultsEl = document.getElementById('settle-results');
+            const members = state.tripData.members || [];
+            
+            if(state.expenses.length === 0 || members.length === 0) {
+                resultsEl.innerHTML = `<div class="text-center text-sm text-gray-500 py-6">정산할 내역이 없습니다.</div>`;
+            } else {
+                const results = calculateSettlement(state.expenses, members);
+                
+                if(results.length === 0) {
+                    resultsEl.innerHTML = `
+                        <div class="bg-green-50 p-4 rounded-xl text-center border border-green-100">
+                            <i class="ph-fill ph-check-circle text-3xl text-green-500 mb-2"></i>
+                            <p class="font-bold text-green-800 text-sm">모든 정산이 딱 맞습니다!<br>보낼 돈이 없습니다.</p>
+                        </div>
+                    `;
+                } else {
+                    resultsEl.innerHTML = results.map(r => `
+                        <div class="flex items-center justify-between bg-gray-50 border border-gray-100 p-4 rounded-xl">
+                            <div class="flex items-center gap-3">
+                                <div class="font-bold text-gray-800">${r.from}</div>
+                                <i class="ph-bold ph-arrow-right text-gray-400"></i>
+                                <div class="font-bold text-blue-600">${r.to}</div>
+                            </div>
+                            <div class="font-bold text-gray-900">${formatMoney(r.amount, r.currency)}</div>
+                        </div>
+                    `).join('');
+                }
+            }
+            
+            const modal = document.getElementById('settle-modal');
+            const content = document.getElementById('settle-modal-content');
+            modal.classList.remove('hidden');
+            
+            // Trigger animation
+            requestAnimationFrame(() => {
+                content.classList.remove('translate-y-full');
+            });
+        };
+
+        window.closeSettlement = () => {
+            const modal = document.getElementById('settle-modal');
+            const content = document.getElementById('settle-modal-content');
+            
+            content.classList.add('translate-y-full');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 300); // match transition duration
+        };
+
+        function calculateSettlement(expenses, members) {
+            let balances = {};
+            const currencies = ['KRW', 'USD', 'JPY', 'PHP'];
+            
+            // init
+            currencies.forEach(cur => balances[cur] = {});
+            members.forEach(m => { 
+                currencies.forEach(cur => balances[cur][m] = 0); 
+            });
+
+            expenses.forEach(ex => {
+                const cur = ex.currency || 'KRW';
+                if(!balances[cur]) {
+                    balances[cur] = {};
+                    members.forEach(m => balances[cur][m] = 0);
+                }
+                const total = Number(ex.amount);
+                const involved = ex.involved || [];
+                if(involved.length === 0) return;
+
+                const splitAmount = total / involved.length;
+                
+                // Add to payer
+                if(balances[cur][ex.payer] !== undefined) {
+                    balances[cur][ex.payer] += total;
+                }
+                
+                // Subtract from involved
+                involved.forEach(m => {
+                    if(balances[cur][m] !== undefined) {
+                        balances[cur][m] -= splitAmount;
+                    }
+                });
+            });
+
+            // resolve debts greedily
+            let results = [];
+            for (let cur of Object.keys(balances)) {
+                let debtors = [];
+                let creditors = [];
+                
+                members.forEach(m => {
+                    let b = balances[cur][m];
+                    if (b > 0.01) creditors.push({ member: m, amount: b });
+                    else if (b < -0.01) debtors.push({ member: m, amount: -b });
+                });
+
+                // Sort descending to settle largest first
+                debtors.sort((a,b) => b.amount - a.amount);
+                creditors.sort((a,b) => b.amount - a.amount);
+
+                let d = 0, c = 0;
+                while (d < debtors.length && c < creditors.length) {
+                    let amount = Math.min(debtors[d].amount, creditors[c].amount);
+                    
+                    results.push({
+                        from: debtors[d].member,
+                        to: creditors[c].member,
+                        amount: amount,
+                        currency: cur
+                    });
+
+                    debtors[d].amount -= amount;
+                    creditors[c].amount -= amount;
+
+                    if (debtors[d].amount < 0.01) d++;
+                    if (creditors[c].amount < 0.01) c++;
+                }
+            }
+            return results;
+        }
+
+        // ==========================================
+        // UTILS
+        // ==========================================
+        function generateId() {
+            return Math.random().toString(36).substring(2, 9);
+        }
+
+        function showLoading(text) {
+            document.getElementById('loading-text').textContent = text;
+            document.getElementById('loading-overlay').classList.remove('hidden');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading-overlay').classList.add('hidden');
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-msg').textContent = msg;
+            toast.classList.remove('opacity-0');
+            toast.classList.add('opacity-100', 'translate-y-4');
+            
+            setTimeout(() => {
+                toast.classList.remove('opacity-100', 'translate-y-4');
+                toast.classList.add('opacity-0');
+            }, 3000);
+        }
+
+        function alertUI(msg) {
+            // Custom alert to avoid browser default blocking iframe execution
+            showToast(msg);
+        }
+
+        // Start App
+        init();
+
+    </script>
+</body>
+</html>
